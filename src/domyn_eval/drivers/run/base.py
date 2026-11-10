@@ -85,7 +85,7 @@ class BaseRunDriver(ABC):
         if not self.config.general.run_id:
             self.config.general.run_id = str(int(time.time()))
         self.run_id = self.config.general.run_id
-        self.output_dir = str(results_dir(self.model_id, self.run_id, self.suite, create=True))
+        self.output_dir = str(results_dir(self.model_id, self.run_id, self.suite, create=True).absolute())
 
     @abstractmethod
     def build_command(self) -> list[str]:

@@ -12,6 +12,7 @@ backend:
 args: >-
   --max-model-len 131072
   --dtype bfloat16
+  --trust-remote-code
   --tensor-parallel-size 1
   --gpu-memory-utilization 0.9
   --reasoning-parser qwen3

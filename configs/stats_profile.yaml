@@ -1,0 +1,8 @@
+# Stats profile: when a run's stats flag a benchmark's scores as untrustworthy, as shares of its samples.
+# These are the defaults; copy the file and change a value to judge runs differently.
+max_truncated: 0.05  # cut off by the token budget, above which scores are flagged
+max_empty: 0.10      # empty answers, above
+min_reasoning: 0.50  # with reasoning on, answers with a reasoning trace, below
+max_reasoning: 0.10  # with reasoning off, answers with a reasoning trace, above
+max_looping: 0.05    # answers or reasoning that end stuck repeating the same text, above
+near_budget: 0.98    # share of its token budget a request must use to count as truncated, without a stop reason

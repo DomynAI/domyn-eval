@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+jobs:
+  validate-names:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate branch name
+        env:
+          BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+        run: |
+          if [[ "$BRANCH_NAME" == "main" ]]; then
+            echo "Skipping branch-name validation for main"
+            exit 0
+          fi
+
+          if [[ ! "$BRANCH_NAME" =~ ^(feat|fix|docs|refactor|test|chore|ci|build|perf)/[a-z0-9]+([._/-][a-z0-9]+)*$ ]]; then
+            echo "::error::Invalid branch name: $BRANCH_NAME"
+            echo "Expected: <type>/<description>"
+            echo "Examples: feat/bfcl-parallel-calls, fix/missing-config"
+            exit 1
+          fi
+
+      - name: Validate PR title
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          if [[ ! "$PR_TITLE" =~ ^(feat|fix|docs|refactor|test|chore|ci|build|perf)(\([a-z0-9._/-]+\))?(!)?:\ .+ ]]; then
+            echo "::error::Invalid PR title: $PR_TITLE"
+            echo "Expected Conventional Commits format, e.g. 'feat(bfcl): add parallel calls'"
+            exit 1
+          fi
+
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.13"]
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install UV
+        run: pipx install uv
+      - name: Define a cache for the virtual environment
+        uses: actions/cache@v3
+        with:
+          path: ./.venv
+          key: venv-${{ hashFiles('uv.lock') }}
+      - name: Configure GitHub authentication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh auth setup-git
+      - name: Install dependencies
+        run: uv sync --all-groups
+      - name: Run Python tests
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          uv run pytest -v || status=$?
+          if [[ "${status:-0}" -ne 0 && "${status:-0}" -ne 5 ]]; then
+            exit "$status"
+          fi
+      - name: Run hooks
+        uses: pre-commit/action@v3.0.1
+        with:
+          extra_args: --all-files

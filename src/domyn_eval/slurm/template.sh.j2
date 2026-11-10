@@ -1,0 +1,10 @@
+#!/bin/bash
+#SBATCH --job-name={{ job_name }}
+#SBATCH --output={{ log_file }}
+{% for name, value in directives.items() -%}
+#SBATCH --{{ name }}={{ value }}
+{% endfor %}
+set -euo pipefail
+
+echo "Running {{ job_name }} on $(hostname)"
+{{ command }}

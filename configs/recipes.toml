@@ -1,0 +1,108 @@
+# The recipes behind our published results. Run one with `domyn-eval run <config> --recipe <name>`.
+#
+# A recipe lists, per suite, entries that override the suite's config section: a "key=value" string, a table, or a
+# list of either. `extend = [...]` adds other recipes' entries before the recipe's own; each inspect entry runs as its
+# own task group, named by its `task`.
+
+#-------------------------------------------------------------------------------
+# Academic core
+
+[math]
+description = "Math: AIME 2025 and AIME 2026 (avg@16), MGSM in European languages."
+[math.suites]
+inspect = { task = "math", max_tasks = 20, fail_on_error = 0.1, custom_tasks = [
+    { task = "inspect_evals/aime2025", pass_k = 10 },
+    { task = "inspect_evals/aime2026", pass_k = 10 },
+    { task = "inspect_evals/mgsm", task_args = { languages = ["de", "en", "es", "fr", "ru"] } },
+] }
+
+[knowledge]
+description = "Knowledge and reasoning: GPQA Diamond, MMLU-Pro."
+[knowledge.suites]
+inspect = { task = "knowledge", max_tasks = 20, fail_on_error = 0.1, request_timeout = 2400, custom_tasks = [
+    { task = "inspect_evals/gpqa_diamond" },
+    { task = "inspect_evals/mmlu_pro" },
+] }
+
+#-------------------------------------------------------------------------------
+# Instruction Following
+
+[if]
+description = "Instruction following: IFEval, IFBench, IFStruct."
+[if.suites]
+inspect = { task = "if", max_tasks = 3, fail_on_error = 0.1, custom_tasks = [
+    { task = "inspect_evals/ifeval" },
+    { task = "inspect_evals/ifbench" },
+    { task = "inspect_evals/ifstruct" },
+] }
+
+#-------------------------------------------------------------------------------
+# Function Calling
+
+[fc]
+description = "BFCL v4: single-turn, multi-turn, memory and web search."
+[fc.suites]
+bfcl = "test_category=all_scoring"
+
+[fc_offline]
+description = "BFCL v4 without web search, so no internet access is needed."
+[fc_offline.suites]
+bfcl = "test_category=all_scoring_no_websearch"
+
+#-------------------------------------------------------------------------------
+# Agentic
+
+[tau2]
+description = "Agentic customer service: tau2 airline, retail, telecom. The judge plays the user."
+[tau2.suites]
+inspect = { task = "tau2", max_tasks = 20, custom_tasks = [
+    { task = "inspect_evals/tau2_airline", message_limit = 200, judge = true },
+    { task = "inspect_evals/tau2_retail", message_limit = 200, judge = true },
+    { task = "inspect_evals/tau2_telecom", message_limit = 200, judge = true },
+] }
+
+[tau3]
+description = "tau2, then agentic banking, with knowledge-base search and discoverable tools. The judge plays the user."
+extend = ["tau2"]
+[tau3.suites]
+inspect = { task = "tau3", max_tasks = 20, custom_tasks = [
+    { task = "inspect_evals/tau2_banking", message_limit = 200, judge = true },
+] }
+
+#-------------------------------------------------------------------------------
+# Code. The tasks run the model's code in Singularity sandboxes, whose images
+# are cached in $INSPECT_SINGULARITY_SIF_DIR.
+
+[code]
+description = "Code, graded in Singularity: SciCode (with scientific background), BigCodeBench, MBPP, LiveBench coding."
+[code.suites]
+inspect = { task = "code", max_tasks = 2, num_threads = 512, custom_tasks = [
+    { task = "inspect_evals/scicode_singularity", task_args = { provide_scientific_background = true }, display_name = "SciCode (with background)" },
+    { task = "inspect_evals/bigcodebench_singularity", task_args = { version = "v0.1.2" }, display_name = "BigCodeBench (Singularity)" },
+    { task = "inspect_evals/mbpp_singularity", display_name = "MBPP (Singularity)" },
+    { task = "inspect_evals/livebench_offline", task_args = { livebench_release_date = 2024-11-25, category = "coding" }, display_name = "LiveBench coding" },
+] }
+
+[swe]
+description = "Agentic software engineering: SWE-bench Verified, graded in Singularity."
+[swe.suites]
+inspect = { task = "swe", max_tasks = 1, num_threads = 100, custom_tasks = [
+    { task = "inspect_evals/swe_bench_singularity", task_args = { message_limit = 300 }, display_name = "SWE-bench Verified (Singularity)" },
+] }
+
+#-------------------------------------------------------------------------------
+# Long Context
+
+[long_context]
+description = "Long context: LongBench v2."
+[long_context.suites]
+inspect = { task = "long_context", max_tasks = 1, num_threads = 100, custom_tasks = [
+    { task = "inspect_evals/longbench_v2" },
+] }
+
+#-------------------------------------------------------------------------------
+# Domyn Edge
+
+[domyn_edge]
+description = "The Domyn Edge results: math, knowledge, if, fc_offline, tau3, code, swe."
+extend = ["math", "knowledge", "if", "fc_offline", "tau3", "code", "swe"]

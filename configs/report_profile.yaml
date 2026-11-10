@@ -1,0 +1,82 @@
+# Report profile of Domyn's leaderboard: `domyn-eval report MODEL... --profile configs/report_profile.yaml`.
+# Rows follow this order; a listed metric a model has no result for is reported missing.
+sections:
+  - name: Math
+    benchmarks:
+      - suite: inspect
+        benchmark: aime2026_pass_k
+        label: "AIME 2026 (k=16)"
+        metrics: [aime_scorer/mean/accuracy, aime_scorer/pass_at_1/accuracy, aime_scorer/pass_at_8/accuracy, aime_scorer/pass_at_16/accuracy]
+      - suite: inspect
+        benchmark: aime2025_pass_k
+        label: "AIME 2025 (k=16)"
+        metrics: [aime_scorer/mean/accuracy, aime_scorer/pass_at_1/accuracy, aime_scorer/pass_at_8/accuracy, aime_scorer/pass_at_16/accuracy]
+      - { suite: inspect, benchmark: mgsm, metrics: [match/accuracy], label: MGSM }
+
+  - name: Knowledge & reasoning
+    benchmarks:
+      - { suite: inspect, benchmark: gpqa_diamond, metrics: [choice/accuracy], label: GPQA Diamond }
+      - { suite: inspect, benchmark: mmlu_pro, metrics: [choice/accuracy], label: MMLU-Pro }
+
+  - name: Instruction following
+    benchmarks:
+      - suite: inspect
+        benchmark: ifeval
+        label: IFEval
+        metrics: [instruction_following/prompt_strict_acc, instruction_following/inst_strict_acc]
+      - suite: inspect
+        benchmark: ifbench
+        label: IFBench
+        metrics: [instruction_following/prompt_strict_acc, instruction_following/inst_strict_acc]
+      - { suite: inspect, benchmark: ifstruct, metrics: [ifstruct_scorer/accuracy], label: IFStruct }
+
+  - name: Function calling
+    benchmarks:
+      - suite: bfcl
+        benchmark: all
+        label: "BFCL v4"
+        metrics:
+          - overall_accuracy
+          - non_live_accuracy
+          - live_accuracy
+          - multi_turn_accuracy
+          - web_search_accuracy
+          - memory_accuracy
+          - relevance_accuracy
+          - irrelevance_accuracy
+
+  - name: Agentic
+    benchmarks:
+      - { suite: inspect, benchmark: tau2_airline, metrics: [airline_scorer/accuracy], label: "tau2 airline" }
+      - { suite: inspect, benchmark: tau2_retail, metrics: [retail_scorer/accuracy], label: "tau2 retail" }
+      - { suite: inspect, benchmark: tau2_telecom, metrics: [telecom_scorer/accuracy], label: "tau2 telecom" }
+      - { suite: inspect, benchmark: tau2_banking, metrics: [banking_scorer/accuracy], label: "tau3 banking" }
+      - { suite: inspect, benchmark: "SWE-bench Verified (Singularity)", metrics: [swe_bench_scorer/mean], label: "SWE-bench Verified" }
+
+  - name: Code
+    benchmarks:
+      - suite: inspect
+        benchmark: "SciCode (with background)"
+        label: SciCode
+        metrics:
+          - verify/inspect_evals/percentage_main_problems_solved
+          - verify/inspect_evals/percentage_subproblems_solved
+      - { suite: inspect, benchmark: "BigCodeBench (Singularity)", metrics: [verify/mean], label: BigCodeBench }
+      - suite: inspect
+        benchmark: "MBPP (Singularity)"
+        label: MBPP
+        metrics: [verify/mean/accuracy, verify/pass_at_1/accuracy, verify/pass_at_5/accuracy]
+      - { suite: inspect, benchmark: "LiveBench coding", metrics: [decide_scorer/coding], label: "LiveBench coding" }
+
+  - name: Long context
+    benchmarks:
+      - suite: inspect
+        benchmark: longbench_v2
+        label: LongBench v2
+        metrics:
+          - longbench_v2_scorer/accuracy
+          - longbench_v2_scorer/difficulty_easy
+          - longbench_v2_scorer/difficulty_hard
+          - longbench_v2_scorer/length_short
+          - longbench_v2_scorer/length_medium
+          - longbench_v2_scorer/length_long

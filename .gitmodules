@@ -1,0 +1,6 @@
+[submodule "suites/domyn-inspect"]
+	path = suites/domyn-inspect
+	url = https://github.com/DomynAI/domyn-inspect.git
+[submodule "suites/domyn-bfcl"]
+	path = suites/domyn-bfcl
+	url = https://github.com/DomynAI/domyn-bfcl.git

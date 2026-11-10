@@ -172,4 +172,4 @@ cython_debug/
 .sdag
 
 # domyn-swarm
-.domyn-swarm
+.domyn_swarm

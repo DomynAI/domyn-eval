@@ -11,8 +11,8 @@ swarm_config = "configs/qwen/swarms/qwen3.5-9b.yaml"
 
 [generation]
 reasoning = true
-num_threads = 512
-request_timeout = 2400
+num_threads = 128
+request_timeout = 7200
 
 [generation.think]
 temperature = 1.0

@@ -106,3 +106,10 @@ inspect = { task = "long_context", max_tasks = 1, num_threads = 100, custom_task
 [domyn_edge]
 description = "The Domyn Edge results: math, knowledge, if, fc_offline, tau3, code, swe."
 extend = ["math", "knowledge", "if", "fc_offline", "tau3", "code", "swe"]
+
+#-------------------------------------------------------------------------------
+# All
+
+[all]
+description = "All the supported suites: math, knowledge, if, fc_offline, tau3, code, swe, long_context."
+extend = ["math", "knowledge", "if", "fc_offline", "tau3", "code", "swe", "long_context"]

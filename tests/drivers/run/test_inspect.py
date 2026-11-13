@@ -1,7 +1,6 @@
 """Tests for the inspect run driver."""
 
 import copy
-import shlex
 import subprocess
 import tomllib
 from pathlib import Path

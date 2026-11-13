@@ -23,15 +23,26 @@ def _task_config(config: Config) -> dict:
     return tomllib.loads(InspectRunDriver(config)._write_inline_task_config().read_text())
 
 
-def test_needs_judge_when_a_task_sets_judge(config: Config) -> None:
-    config.suite.inspect.custom_tasks = [{"task": "inspect_evals/math"}, {"task": "inspect_evals/hle", "judge": True}]
-    assert InspectRunDriver(config).needs_judge
+def test_the_roles_are_those_the_tasks_name(config: Config) -> None:
+    config.suite.inspect.custom_tasks = [
+        {"task": "inspect_evals/math"},
+        {"task": "inspect_evals/hle", "roles": ["grader"]},
+        {"task": "inspect_evals/tau2_airline", "roles": ["user"]},
+    ]
+    assert InspectRunDriver(config).roles == {"user", "grader"}
 
 
-def test_needs_no_judge_when_no_task_sets_judge(config: Config) -> None:
+def test_no_roles_when_no_task_names_one(config: Config) -> None:
     # the benchmark name alone does not decide it
     config.suite.inspect.custom_tasks = [{"task": "inspect_evals/hle"}]
-    assert not InspectRunDriver(config).needs_judge
+    assert not InspectRunDriver(config).roles
+
+
+@pytest.mark.parametrize("roles", [["judge"], "user"])
+def test_a_task_names_only_known_roles(config: Config, roles: object) -> None:
+    config.suite.inspect.custom_tasks = [{"task": "inspect_evals/hle", "roles": roles}]
+    with pytest.raises(ValidationError, match="roles"):
+        _ = InspectRunDriver(config).tasks
 
 
 def test_custom_tasks_reject_unknown_keys(config: Config) -> None:
@@ -86,9 +97,9 @@ def test_task_config_keeps_task_args_types(config: Config) -> None:
     assert _task_config(config)["tasks"][0]["task_args"] == task_args
 
 
-def test_task_config_drops_the_judge_flag(config: Config) -> None:
-    # judge is ours; domyn-inspect does not know the key
-    config.suite.inspect.custom_tasks = [{"task": "inspect_evals/hle", "judge": True}]
+def test_task_config_drops_the_roles(config: Config) -> None:
+    # roles is ours; domyn-inspect does not know the key
+    config.suite.inspect.custom_tasks = [{"task": "inspect_evals/hle", "roles": ["grader"]}]
     assert _task_config(config)["tasks"] == [{"task": "inspect_evals/hle"}]
 
 
@@ -106,7 +117,7 @@ def test_build_command_limit_prefers_the_suite_max_samples(
 ) -> None:
     config.suite.inspect.custom_tasks = [{"task": "inspect_evals/math"}]
     config.suite.inspect.max_samples = suite_max_samples
-    config.generation.max_samples = max_samples
+    config.general.max_samples = max_samples
     args = InspectRunDriver(config).build_command()
     assert (args[args.index("--limit") + 1] if "--limit" in args else None) == expected
 

@@ -68,13 +68,13 @@ def test_stats_of_a_run_without_samples_are_empty(saved_run: tuple[str, str]) ->
 def test_stats_read_the_runs_results_with_its_saved_config(
     config: Config, saved_run: tuple[str, str], tmp_path: Path
 ) -> None:
-    config.generation.reasoning = False
+    config.model.generation.reasoning = False
     config.save(tmp_path / "test-model" / "r1" / "config.toml")
 
     driver = ListStats(saved_run, [])
 
     assert driver.results_dir == tmp_path / "test-model" / "r1" / "results" / "list"
-    assert driver.config.generation.reasoning is False
+    assert driver.config.model.generation.reasoning is False
     assert driver.profile == StatsProfile()
 
 

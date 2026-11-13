@@ -20,11 +20,23 @@ with the sections of the suites it ran.
 | `log_level` | `"INFO"` | Level of domyn-eval's own logs. |
 | `recipes_file` | `"configs/recipes.toml"` | The recipes `--recipe` picks from. |
 | `run_id` | the current time | Names the run's folder; set at run time with `run --run-id`. |
+| `max_samples` | `-1` | Samples per task, `-1` for all; set at run time with `run --max-samples`. |
+| `num_threads` | `64` | Concurrent requests of each suite that sets no `num_threads` of its own. |
+| `request_timeout` | `3600` | Seconds a request may take. |
+| `max_retries` | `0` | Retries of a failed request. |
 
-## `[model]` and `[judge]`
+## `[model]`, `[judge]` and `[user]`
 
-`[model]` is the model under evaluation. `[judge]` is the model that grades
-answers or plays the user, for the tasks that need one.
+`[model]` is the model under evaluation. The others play the roles some tasks
+need, named by their `roles`:
+
+- `user`, the user simulated in agentic tasks (tau2), is played by `[user]`,
+  else by `[judge]`, else by the model under test;
+- `grader`, the grader of model-graded scorers, is played by `[judge]`, else
+  by the model under test.
+
+A run whose tasks need a role fails its checks if no section plays it, or if
+that section's `url` is unset and `run --swarm` does not serve one.
 
 | Key | Default | Description |
 | --- | --- | --- |
@@ -35,20 +47,16 @@ answers or plays the user, for the tasks that need one.
 | `swarm_config` | | The domyn-swarm YAML `run --swarm` deploys the model from. |
 | `swarm_name` | | A running domyn-swarm deployment `run --swarm` reuses. |
 
-## `[generation]`
+### `[model.generation]`, `[judge.generation]` and `[user.generation]`
+
+How each model's requests are built. A model sets the tables it uses: the
+model under test its modes, the others their roles.
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `reasoning` | `true` | Whether the model reasons before answering; picks `[generation.think]` over `[generation.nothink]`. |
-| `max_tokens` | `0` | The completion budget; `0` uses what the context window leaves. |
-| `max_model_len` | `0` | The context window; `0` reads it from the endpoint. |
-| `token_safety_margin` | `256` | Tokens kept free when the completion budget is computed. |
-| `tokenizer_path` | `model.path` | The tokenizer prompt tokens are counted with; without one, prompt lengths are estimated. |
-| `request_timeout` | `3600` | Seconds a request may take. |
-| `max_retries` | `0` | Retries of a failed request. |
-| `num_threads` | `64` | Concurrent requests of each suite that sets no `num_threads` of its own. |
+| `reasoning` | `true` | Whether the model reasons before answering; picks `think` over `nothink` as its mode. |
 
-### `[generation.think]` and `[generation.nothink]`
+### `[model.generation.think]` and `[model.generation.nothink]`
 
 The sampling parameters of each mode. Unset parameters are left to the
 endpoint's defaults.
@@ -62,10 +70,28 @@ endpoint's defaults.
 | `presence_penalty` | | Penalty on tokens already present. |
 | `frequency_penalty` | | Penalty scaled by a token's count so far. |
 | `repetition_penalty` | | Multiplicative penalty on repeated tokens. |
-| `do_sample` | | Sample rather than decode greedily. |
+| `do_sample` | | Sample rather than decode greedily; only lm_eval uses it. |
 | `chat_template_kwargs` | | Extra chat template arguments, e.g. `{ enable_thinking = true }`. |
-| `system_prompt_template` | `"{instruction}"` | The system prompt; `{instruction}` is the task's own. |
-| `min_completion_tokens` | | Completion tokens kept when a long prompt is truncated to fit the context. |
+
+### `[judge.generation.user]` and `[judge.generation.grader]`
+
+The sampling parameters of each role, as played by this model, e.g.
+`[user.generation.user]`. They take the keys of the modes and apply over the
+selected mode. Both default to `temperature = 0`, as tau2 asks of its user;
+a table keeps it unless it sets its own.
+
+### `[model.generation.context]` and `[judge.generation.context]`
+
+The context window and how it is budgeted. Only `max_tokens` applies to
+`[judge]` and `[user]`, whose roles it caps.
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `max_tokens` | `0`, and `4096` for `[judge]` and `[user]` | The cap on each generation; `0` uses what the context window leaves, which lets a looping judge write its whole window into the conversation. |
+| `max_model_len` | `0` | The context window; `0` reads it from the endpoint. |
+| `completion_reserve` | | Completion tokens kept when a long prompt is truncated to fit the context; unset, 8192 with reasoning and 4096 without. |
+| `token_safety_margin` | `256` | Tokens kept free when the completion budget is computed. |
+| `tokenizer_path` | `model.path` | The tokenizer prompt tokens are counted with; without one, prompt lengths are estimated. |
 
 ## `[slurm]`
 
@@ -95,11 +121,11 @@ The domyn-inspect suite. Recipes usually set `task` and `custom_tasks`.
 | `path` | `"suites/domyn-inspect"` | The suite's checkout, relative to `SUITES_BASE_DIR`. |
 | `task` | | Names the task group; each recipe entry needs its own. |
 | `custom_tasks` | `[]` | The tasks to run; see below. |
-| `max_samples` | | Samples per task; overrides `run --max-samples`. |
-| `max_tokens` | | The tasks' completion budget; overrides `generation.max_tokens`. |
-| `num_threads` | | Concurrent requests (inspect's `max_connections`); overrides `generation.num_threads`. |
+| `max_samples` | | Samples per task; overrides `general.max_samples`. |
+| `max_tokens` | | The tasks' completion budget; overrides `model.generation.context.max_tokens`. |
+| `num_threads` | | Concurrent requests (inspect's `max_connections`); overrides `general.num_threads`. |
 | `max_tasks` | | Tasks run in parallel. |
-| `request_timeout` | | Seconds a request may take; overrides `generation.request_timeout`. |
+| `request_timeout` | | Seconds a request may take; overrides `general.request_timeout`. |
 | `fail_on_error` | | Whether a failed sample fails its task; a number is the tolerated share of failed samples. |
 | `retry_attempts` | | Retries of a failed task. |
 | `retry_wait` | | Seconds between task retries. |
@@ -116,7 +142,7 @@ Each `custom_tasks` entry is a table:
 | `message_limit` | | Messages an agentic sample may exchange. |
 | `pass_k` | | Samples per prompt; reports the mean and pass@1, 2, 4, ... up to k. |
 | `dual_score` | `false` | Report both the upstream scorer's strict accuracy and domyn-inspect's looser answer extraction. |
-| `judge` | `false` | The task needs `[judge]`; `run --swarm` serves one. |
+| `roles` | `[]` | The model roles the task needs, `"user"` and `"grader"`; `run --swarm` serves the models playing them. |
 
 ## `[bfcl]`
 
@@ -128,7 +154,7 @@ The domyn-bfcl suite.
 | `test_category` | | The BFCL test categories, comma-separated, e.g. `all_scoring`, `all_scoring_no_websearch`. |
 | `fc_model` | `false` | The model calls tools natively, rather than through tools described in the prompt. |
 | `model_class` | | The BFCL handler class; unset picks the default one. |
-| `num_threads` | | Concurrent requests; overrides `generation.num_threads`. |
+| `num_threads` | | Concurrent requests; overrides `general.num_threads`. |
 
 ## `[lm_eval]`
 
@@ -140,7 +166,7 @@ extra).
 | `task` | | The lm-eval task or group. |
 | `path` | | A folder of extra task configs (lm-eval's `include_path`), relative to `SUITES_BASE_DIR`. |
 | `batch_size` | | Requests per batch, or `"auto"`. |
-| `num_threads` | | Concurrent requests (lm-eval's `num_concurrent`); overrides `generation.num_threads`. |
+| `num_threads` | | Concurrent requests (lm-eval's `num_concurrent`); overrides `general.num_threads`. |
 | `chat_completions` | `false` | Use the chat endpoint, which applies the chat template but returns no logprobs. |
 | `log_samples` | `false` | Write every sample to the results. |
 | `max_seq_lengths` | `[]` | The context lengths of the RULER tasks. |

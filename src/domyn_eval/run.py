@@ -128,7 +128,7 @@ def run(config: Config, entries: list[Entry], options: RunOptions, console: Cons
         drivers = [run_driver(e.suite)(_entry_config(config, entries, e)) for e in entries]
         needed = _needed_roles(entries, drivers)
         if handler:
-            for section in sorted({config.role_section(role) for role in needed} - {None}):
+            for section in sorted({s for role in needed if (s := config.role_section(role)) is not None}):
                 handler.ensure_endpoint(handler.ModelType(section), options.dry)
         if options.check:
             deploying = options.dry and handler is not None

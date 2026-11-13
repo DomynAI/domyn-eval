@@ -197,7 +197,7 @@ class GenerationConfig:
     @field_validator("user", "grader", mode="before")
     @classmethod
     def _role_defaults(cls, role: Any, info: ValidationInfo) -> Any:  # noqa: ANN401 - a raw table, or a SamplingConfig
-        return {**_ROLE_DEFAULTS[info.field_name], **role} if isinstance(role, dict) else role
+        return {**_ROLE_DEFAULTS.get(info.field_name or "", {}), **role} if isinstance(role, dict) else role
 
     @property
     def mode(self) -> SamplingConfig:

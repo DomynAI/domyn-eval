@@ -171,14 +171,15 @@ adds suites with the config's own settings.
 
 | Variable | Default | Description |
 | --- | --- | --- |
+| `API_KEY` | | The key every suite sends to the model, judge and user endpoints. |
 | `RUNS_DIR` | `runs` | Where runs are written and `report` reads them. |
 | `SUITES_BASE_DIR` | the working directory | The base of the suites' `path`. |
-| `API_KEY` | | The key every suite sends to the model and judge endpoints. |
-| `DOMYN_SWARM_DEFAULTS` | `~/.domyn_swarm/defaults.yaml` | domyn-swarm's site defaults: container image, SLURM account and partition. |
 | `HF_HOME` | | The Hugging Face cache, referenced by the swarm configs. |
+| `DOMYN_SWARM_HOME` | `~/.domyn_swarm/` | domyn-swarm's home directory, where defaults and logs are stored. |
 | `BRAVE_API_KEY` | | bfcl's web_search categories query Brave with it. |
 | `BFCL_ENCODER_MODEL` | | A local all-MiniLM-L6-v2 for bfcl's memory categories on offline nodes. |
 | `INSPECT_SINGULARITY_SIF_DIR` | `.cache/singularity_sif` in the domyn-inspect checkout | The Singularity image cache of inspect's code and swe tasks; see [benchmarks.md](benchmarks.md#inspect). |
+| `SINGULARITY_TMPDIR` | | Where `singularity pull` builds its temporary images. |
 
 [.env.example](../.env.example) lists them: copy it to `.env` and run with
 `uv run --env-file .env domyn-eval ...`, or `export UV_ENV_FILE=$PWD/.env`

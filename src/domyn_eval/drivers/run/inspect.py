@@ -3,6 +3,7 @@
 
 import dataclasses
 import logging
+import shlex
 from pathlib import Path
 
 import tomli_w
@@ -85,14 +86,21 @@ class InspectRunDriver(BaseRunDriver):
         return suite_dir(self.path)
 
     def setup(self) -> None:
-        """Install the suite's uv environment, then prefetch the run's tasks and check they load offline.
+        """Install the suite's uv environment and the external task packages, then prefetch the run's tasks.
+
+        The prefetch also checks the tasks load offline.
 
         Raises:
             ValueError: If ``[inspect]`` has no ``custom_tasks``.
-            RuntimeError: If the install or the prefetch fails.
+            RuntimeError: If an install or the prefetch fails.
         """
         if self._run_command(["uv", "sync"], log="setup", cwd=self.command_cwd) != 0:
             msg = f"uv sync failed in {self.command_cwd}"
+            raise RuntimeError(msg)
+        if self.config.suite.inspect.task_packages and self._run_command(
+            self._install_ext_task_packages(), log="setup", cwd=self.command_cwd
+        ):
+            msg = f"installing task_packages {self.config.suite.inspect.task_packages} failed"
             raise RuntimeError(msg)
         self._prefetch_tasks(self._write_inline_task_config())
 
@@ -102,9 +110,26 @@ class InspectRunDriver(BaseRunDriver):
         The entry's config is its own copy, not the run's ``config.toml``: that holds only the last entry of each
         suite, and a submitted job reads its config when it starts, after the later entries have been written.
 
+        With ``task_packages``, the command first installs them again, offline: the ``uv sync`` of a later entry's
+        setup removes them, and with ``--sbatch`` every entry is set up before the first job starts.
+
         Raises:
             ValueError: If ``[inspect]`` has no ``custom_tasks``.
         """
+        command = self._inspect_command()
+        if not self.config.suite.inspect.task_packages:
+            return command
+        return ["sh", "-c", f"{shlex.join(self._install_ext_task_packages('--offline'))} && exec {shlex.join(command)}"]
+
+    def _install_ext_task_packages(self, *options: str) -> list[str]:
+        """``uv pip install`` of the task packages, editable and without dependencies: they use domyn-inspect's."""
+        packages = [
+            arg for p in self.config.suite.inspect.task_packages for arg in ("--editable", str(Path(p).resolve()))
+        ]
+        return ["uv", "pip", "install", "--python", str(self.python), "--no-deps", *options, *packages]
+
+    def _inspect_command(self) -> list[str]:
+        """``python -m domyn_inspect`` on the entry's config and task config; see ``build_command``."""
         task_config = self._write_inline_task_config()
         args = [
             str(self.python),

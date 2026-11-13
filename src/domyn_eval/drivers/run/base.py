@@ -95,20 +95,24 @@ class BaseRunDriver(ABC):
     def setup(self) -> None:
         """Prepare everything the suite needs before it can run, e.g. install its environment."""
 
-    def write_config(self) -> Path:
-        """Save the run's resolved config to ``config_file``, with this suite's section and the context window.
+    def write_config(self, path: Path | None = None) -> Path:
+        """Save the run's resolved config, with this suite's section and the context window.
 
         The suite is marked used on the shared config, so the file keeps the sections of every suite the run has
         written so far. ``max_model_len`` is added to ``generation.max_model_len``.
 
+        Args:
+            path: Where to save it; ``config_file`` by default.
+
         Returns:
-            The path of the written file, ``config_file``.
+            The path of the written file.
         """
+        path = path or self.config_file
         self.config.suite.use(self.suite)
         config = copy.deepcopy(self.config)
         config.generation.max_model_len = self.max_model_len
-        config.save(self.config_file)
-        return self.config_file
+        config.save(path)
+        return path
 
     def run(self, log: str = "run") -> int:
         """Run the suite's command, its output going to ``<log_dir>/<log>.log``.

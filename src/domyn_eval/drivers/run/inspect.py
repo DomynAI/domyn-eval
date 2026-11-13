@@ -70,6 +70,11 @@ class InspectRunDriver(BaseRunDriver):
         return [InspectTask.model_validate(task) for task in self.config.suite.inspect.custom_tasks or []]
 
     @property
+    def _name(self) -> str:
+        """The entry's task group, which names its config files: ``task`` of ``[inspect]``."""
+        return self.config.suite.inspect.task or "inline"
+
+    @property
     def needs_judge(self) -> bool:
         """Whether any task sets ``judge = true``."""
         return any(task.judge for task in self.tasks)
@@ -92,19 +97,23 @@ class InspectRunDriver(BaseRunDriver):
         self._prefetch_tasks(self._write_inline_task_config())
 
     def build_command(self) -> list[str]:
-        """``python -m domyn_inspect`` on this run's saved config and the task config it writes first.
+        """``python -m domyn_inspect`` on the entry's own config and task config, both written first.
+
+        The entry's config is its own copy, not the run's ``config.toml``: that holds only the last entry of each
+        suite, and a submitted job reads its config when it starts, after the later entries have been written.
 
         Raises:
             ValueError: If ``[inspect]`` has no ``custom_tasks``.
         """
+        task_config = self._write_inline_task_config()
         args = [
             str(self.python),
             "-m",
             "domyn_inspect",
             "--model",
-            str(self.config_file),
+            str(self.write_config(Path(self.output_dir, f"config_{self._name}.toml").absolute())),
             "--task",
-            str(self._write_inline_task_config()),
+            str(task_config),
             "--log-dir",
             self.output_dir,
             "--run",
@@ -150,14 +159,14 @@ class InspectRunDriver(BaseRunDriver):
             msg = "No inspect tasks to run: list them in [inspect] custom_tasks, or run a recipe that defines them."
             raise ValueError(msg)
         inspect = self.config.suite.inspect
-        name = inspect.task or "inline"
-        values = {**dataclasses.asdict(inspect), "name": name, "log_shared": True}  # each table keeps its own fields
+        # each table keeps its own fields
+        values = {**dataclasses.asdict(inspect), "name": self._name, "log_shared": True}
         task_config = _TasksConfig(
             general=_TasksGeneral.model_validate(values),
             inspect=_TasksInspect.model_validate(values),
             tasks=self.tasks,
         )
-        path = Path(self.output_dir, f"tasks_{name}.toml").absolute()
+        path = Path(self.output_dir, f"tasks_{self._name}.toml").absolute()
         with path.open("wb") as f:
             tomli_w.dump(task_config.model_dump(exclude_defaults=True), f)
         logger.debug("inspect: task config in %s", display_path(path))

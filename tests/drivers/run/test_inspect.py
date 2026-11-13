@@ -1,5 +1,6 @@
 """Tests for the inspect run driver."""
 
+import copy
 import tomllib
 from pathlib import Path
 
@@ -110,12 +111,30 @@ def test_build_command_limit_prefers_the_suite_max_samples(
     assert (args[args.index("--limit") + 1] if "--limit" in args else None) == expected
 
 
-def test_build_command_passes_the_saved_config_and_the_task_config_it_writes(config: Config) -> None:
+def test_build_command_passes_the_entry_config_and_the_task_config_it_writes(config: Config) -> None:
     config.suite.inspect.custom_tasks = [{"task": "inspect_evals/math"}]
+    config.suite.inspect.task = "math"
     driver = InspectRunDriver(config)
     args = driver.build_command()
-    assert args[args.index("--model") + 1] == str(driver.config_file)
+    model = Path(args[args.index("--model") + 1])
+    assert model == Path(driver.output_dir, "config_math.toml")
+    assert tomllib.loads(model.read_text())["inspect"]["task"] == "math"
     assert Path(args[args.index("--task") + 1]).is_file()
+
+
+def test_an_entrys_config_survives_the_later_entries_of_the_run(config: Config) -> None:
+    # A submitted job reads its config when it starts, after every entry has been written.
+    entries = [("math", 20), ("long_context", 1)]
+    commands = []
+    for task, max_tasks in entries:
+        entry = copy.deepcopy(config)
+        entry.suite.inspect.custom_tasks = [{"task": f"inspect_evals/{task}"}]
+        entry.suite.inspect.task = task
+        entry.suite.inspect.max_tasks = max_tasks
+        commands.append(InspectRunDriver(entry).build_command())
+    for (task, max_tasks), args in zip(entries, commands, strict=True):
+        saved = tomllib.loads(Path(args[args.index("--model") + 1]).read_text())["inspect"]
+        assert (saved["task"], saved["max_tasks"]) == (task, max_tasks)
 
 
 def _module_file(cwd: Path, module: str) -> Path:

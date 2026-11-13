@@ -49,8 +49,10 @@ def _output(
     )
 
 
-def _model_event(model: str, output: ModelOutput) -> ModelEvent:
-    return ModelEvent(model=model, input=[], tools=[], tool_choice="auto", config=GenerateConfig(), output=output)
+def _model_event(output: ModelOutput, role: str | None = None, model: str = "m") -> ModelEvent:
+    return ModelEvent(
+        model=model, role=role, input=[], tools=[], tool_choice="auto", config=GenerateConfig(), output=output
+    )
 
 
 def _sample(
@@ -110,18 +112,18 @@ def test_samples_are_read_from_the_runs_successful_logs(driver: InspectStatDrive
 def test_a_sample_is_the_evaluated_models_final_generation_before_scoring(
     driver: InspectStatDriver, written_by: str
 ) -> None:
-    """In an agentic task a user simulator speaks last, and a grader may be the evaluated model itself."""
+    """In an agentic task a user simulator speaks last, and a grader may speak after scoring."""
     agent = _output("Your flight is booked.", reasoning="Book it.", tokens=30)
     user = _output("###STOP###", tokens=3)
     sample = _sample()
     sample.output = user
     sample.events = [
-        _model_event("m", _output("Which flight?", reasoning="Ask.")),
-        _model_event("user", _output("The 9am one.")),
-        _model_event("m", agent),
-        _model_event("user", user),
+        _model_event(_output("Which flight?", reasoning="Ask.")),
+        _model_event(_output("The 9am one."), role="user", model="judge"),
+        _model_event(agent),
+        _model_event(user, role="user", model="judge"),
         ScoreEvent(score=Score(value="C")),
-        _model_event("m", _output("GRADE: C")),
+        _model_event(_output("GRADE: C"), role="grader", model="judge"),
     ]
     _write_log(driver.results_dir, "tau2_airline", [sample], written_by=written_by)
 
@@ -135,14 +137,29 @@ def test_a_sample_is_the_evaluated_models_final_generation_before_scoring(
     ]
 
 
+def test_a_user_simulator_served_by_the_evaluated_model_is_not_mistaken_for_it(
+    driver: InspectStatDriver, written_by: str
+) -> None:
+    """Self-play: without a judge, the user simulator is the evaluated model under the same name."""
+    user = _output("###STOP###", stop="max_tokens", tokens=4096)
+    sample = _sample()
+    sample.output = user
+    sample.events = [_model_event(_output("Booked.", tokens=30)), _model_event(user, role="user")]
+    _write_log(driver.results_dir, "tau2_airline", [sample], written_by=written_by)
+
+    assert list(driver.samples()) == [
+        normal_sample(benchmark="inspect_evals/tau2_airline", answer="Booked.", completion_tokens=30)
+    ]
+
+
 def test_a_sample_is_truncated_when_any_of_its_generations_hit_the_budget(
     driver: InspectStatDriver, written_by: str
 ) -> None:
     sample = _sample()
     sample.events = [
-        _model_event("m", _output("", reasoning="Let me think", stop="max_tokens", tokens=1024)),
-        _model_event("user", _output("Hello?")),
-        _model_event("m", _output("42", tokens=20)),
+        _model_event(_output("", reasoning="Let me think", stop="max_tokens", tokens=1024)),
+        _model_event(_output("Hello?"), role="user", model="judge"),
+        _model_event(_output("42", tokens=20)),
     ]
     _write_log(driver.results_dir, "tau2_airline", [sample], written_by=written_by)
 
@@ -157,7 +174,7 @@ def test_a_generations_reasoning_is_read_from_the_samples_attachments(
     """A log moves its events' long texts to the sample's attachments, leaving ``attachment://<hash>`` behind."""
     reasoning = "Wait, let me reconsider. " * 30
     sample = _sample()
-    sample.events = [_model_event("m", _output("42", reasoning="attachment://loop"))]
+    sample.events = [_model_event(_output("42", reasoning="attachment://loop"))]
     sample.attachments = {"loop": reasoning}
     _write_log(driver.results_dir, "aime2025", [sample], written_by=written_by)
 

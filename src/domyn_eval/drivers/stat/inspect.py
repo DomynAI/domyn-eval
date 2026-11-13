@@ -29,9 +29,8 @@ class InspectStatDriver(BaseStatDriver):
     A log written by the installed inspect is read straight from its zip, many times faster than through inspect,
     which validates every event of every sample. Any other log goes through inspect, which knows its format.
 
-    A sample is seen through the evaluated model's generations before scoring, so neither a user simulator nor a
-    grader that speaks after them is mistaken for it. Its answer, reasoning and loops are its final generation's; it
-    is truncated when any generation hit the token budget, and its completion tokens are its longest generation's.
+    In an agentic eval, answer, reasoning and loops are checked on the evaluated model's last turn only; truncation and
+    completion tokens look at all its turns.
     """
 
     @property
@@ -50,7 +49,7 @@ class InspectStatDriver(BaseStatDriver):
             written_by = header.eval.packages.get("inspect_ai")
             read = _read_zip if written_by == _INSPECT_VERSION else _read_inspect
             for sample in read(path):
-                yield _sample(benchmark, sample, header.eval.model)
+                yield _sample(benchmark, sample)
 
 
 def _read_zip(path: Path) -> Iterator[dict[str, Any]]:
@@ -65,7 +64,7 @@ def _read_zip(path: Path) -> Iterator[dict[str, Any]]:
 def _read_inspect(path: Path) -> Iterator[dict[str, Any]]:
     for sample in read_eval_log_samples(str(path), all_samples_required=False):
         events = [
-            {"event": "model", "model": e.model, "output": e.output.model_dump()}
+            {"event": "model", "role": e.role, "output": e.output.model_dump()}
             if e.event == "model"
             else {"event": "score"}
             for e in sample.events
@@ -79,16 +78,17 @@ def _read_inspect(path: Path) -> Iterator[dict[str, Any]]:
         }
 
 
-def _generations(sample: dict[str, Any], model: str) -> list[dict[str, Any]]:
+def _generations(sample: dict[str, Any]) -> list[dict[str, Any]]:
     """The evaluated model's generations before scoring; the sample's output when the log records none.
 
-    The sample's output is whichever model spoke last, e.g. the user simulator of an agentic task.
+    The sample's output is whichever model spoke last, e.g. the user simulator of an agentic task. The evaluated
+    model is the one without a role: a user simulator or grader has one even when it is the same model (self-play).
     """
     generations = []
     for event in sample.get("events") or []:
         if event["event"] == "score":
             break
-        if event["event"] == "model" and event["model"] == model:
+        if event["event"] == "model" and event.get("role") is None:
             generations.append(event["output"])
     return generations or [sample["output"]]
 
@@ -100,12 +100,8 @@ def _attached(text: str, attachments: dict[str, str]) -> str:
     return text
 
 
-def _truncated(output: dict[str, Any]) -> bool:
-    return bool(output["choices"]) and output["choices"][0]["stop_reason"] in _TRUNCATED
-
-
-def _sample(benchmark: str, sample: dict[str, Any], model: str) -> Sample:
-    generations = _generations(sample, model)
+def _sample(benchmark: str, sample: dict[str, Any]) -> Sample:
+    generations = _generations(sample)
     output = generations[-1]
     attachments = sample.get("attachments") or {}
     reasoning = []
@@ -118,7 +114,7 @@ def _sample(benchmark: str, sample: dict[str, Any], model: str) -> Sample:
         benchmark=benchmark,
         answer=output["completion"],
         reasoning="\n".join(reasoning) or None,
-        truncated=any(_truncated(g) for g in generations),
+        truncated=any(g["choices"] and g["choices"][0]["stop_reason"] in _TRUNCATED for g in generations),
         looping=any(find_loop(text) for text in (output["completion"], *reasoning)),
         completion_tokens=max(tokens, default=None),
         scored=bool(sample.get("scores")),

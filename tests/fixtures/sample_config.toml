@@ -6,26 +6,28 @@ log_level = "DEBUG"
 id = "test-model"
 url = "http://127.0.0.1:8001/v1"
 
-[judge]
-url = "http://localhost:8080"
-
-[generation]
+[model.generation]
 reasoning = true
+
+[model.generation.context]
 max_tokens = 1024
 max_model_len = 32768
+completion_reserve = 16384
 
-[generation.think]
+[model.generation.think]
 temperature = 0.6
 top_p = 0.95
 top_k = 20
 chat_template_kwargs = { enable_thinking = true }
-min_completion_tokens = 16384
 
-[generation.nothink]
+[model.generation.nothink]
 temperature = 0.7
 top_p = 0.8
 top_k = 20
 chat_template_kwargs = { enable_thinking = false }
+
+[judge]
+url = "http://localhost:8080"
 
 [slurm]
 walltime = "02:00:00"

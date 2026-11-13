@@ -33,8 +33,8 @@ recipe as a `custom_tasks` entry; see [config.md](config.md#inspect).
 | LongBench v2 | `longbench_v2` | domyn-inspect | long_context |
 
 Task names are registered under `inspect_evals/`, e.g. `inspect_evals/gpqa_diamond`.
-The tau tasks need a judge, which plays the user: set `[judge]`, or pass
-`run --swarm` to serve one from `judge.swarm_config`.
+The tau tasks need a model playing the user: `[user]`, else `[judge]`. Set its
+`url`, or pass `run --swarm` to serve one from its `swarm_config`.
 
 The `code` and `swe` tasks run the model's code in [Singularity](https://sylabs.io/singularity/)
 containers, so `singularity` must be on the path of the node that runs them.

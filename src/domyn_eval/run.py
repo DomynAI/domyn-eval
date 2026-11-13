@@ -65,7 +65,7 @@ class RunOptions:
     """How to run the entries.
 
     Attributes:
-        swarm: Serve the model, and the judge if an entry needs one, with domyn-swarm.
+        swarm: Serve the model, and the judge or user model if an entry needs its role, with domyn-swarm.
         keep_swarm: With ``swarm``, leave up the swarms this run deploys.
         check: Run the preflight checks first.
         dry: Print the commands, or write the job scripts, without running or submitting them.
@@ -116,7 +116,7 @@ def run(config: Config, entries: list[Entry], options: RunOptions, console: Cons
         The exit code: 1 if the preflight or an entry failed.
 
     Raises:
-        ValueError: If the swarm handler cannot serve the model or the judge.
+        ValueError: If the swarm handler cannot serve the model, or a model a role needs.
         RuntimeError: If a swarm fails to come up.
     """
     config.general.run_id = config.general.run_id or str(int(time.time()))
@@ -126,13 +126,14 @@ def run(config: Config, entries: list[Entry], options: RunOptions, console: Cons
         if handler:
             handler.ensure_endpoint(handler.ModelType.MODEL, options.dry)
         drivers = [run_driver(e.suite)(_entry_config(config, entries, e)) for e in entries]
-        judged = [e.label for e, d in zip(entries, drivers, strict=True) if d.needs_judge]
-        if handler and judged:
-            handler.ensure_endpoint(handler.ModelType.JUDGE, options.dry)
+        needed = _needed_roles(entries, drivers)
+        if handler:
+            for section in sorted({config.role_section(role) for role in needed} - {None}):
+                handler.ensure_endpoint(handler.ModelType(section), options.dry)
         if options.check:
             deploying = options.dry and handler is not None
             checks = Preflight(config, [e.suite for e in entries], deploying=deploying).run()
-            checks += _check_judge(config, judged, deploying=deploying)
+            checks += _check_roles(config, needed, deploying=deploying)
             render_checks(checks, console)
             if failed(checks):
                 logger.error("preflight: failed; fix the above, or pass --no-check")
@@ -165,14 +166,14 @@ def _release(handler: "SwarmHandler", *, keep: bool, submitted: bool) -> None:
         for name in handler.deployed_swarms().values():
             logger.info("swarm: %s stays up; stop it with `domyn-swarm down %s -y`", name, name)
     elif not submitted:  # submitted jobs still need the swarm: a teardown job follows them instead
-        handler.down(handler.ModelType.MODEL)
-        handler.down(handler.ModelType.JUDGE)
+        for model_type in handler.ModelType:
+            handler.down(model_type)
 
 
 def _entry_config(config: Config, entries: list[Entry], entry: Entry) -> Config:
     """The config of an entry: the run's, with each suite's section overridden by its entry.
 
-    Endpoints and the generation settings are shared with the run's config, the suite sections are copied. The other
+    Endpoints and their generation settings are shared with the run's config, the suite sections are copied. The other
     suites take the overrides of their last entry, so the run's ``config.toml`` holds every suite of the run.
     """
     entry_config = dataclasses.replace(config, suite=copy.deepcopy(config.suite))
@@ -182,13 +183,33 @@ def _entry_config(config: Config, entries: list[Entry], entry: Entry) -> Config:
     return entry_config
 
 
-def _check_judge(config: Config, judged: list[str], *, deploying: bool) -> list[Check]:
-    if not judged or config.judge.url:
-        return []
-    if deploying and (config.judge.swarm_config or config.judge.swarm_name):
-        return [Check(WARN, "judge.url is set once the judge swarm is deployed; the judge is not checked")]
-    message = f"{', '.join(judged)}: need a judge, but judge.url is not set; set it, or serve one with --swarm"
-    return [Check(FAIL, message)]
+def _needed_roles(entries: list[Entry], drivers: list[BaseRunDriver]) -> dict[str, list[str]]:
+    """The entries needing each model role, by role."""
+    needed: dict[str, list[str]] = {}
+    for entry, driver in zip(entries, drivers, strict=True):
+        for role in sorted(driver.roles):
+            needed.setdefault(role, []).append(entry.label)
+    return needed
+
+
+def _check_roles(config: Config, needed: dict[str, list[str]], *, deploying: bool) -> list[Check]:
+    """Check that the model playing each needed role has an endpoint, or a swarm about to serve it."""
+    checks = []
+    for role, labels in needed.items():
+        who = f"{', '.join(labels)}: need a {role} model"
+        section = config.role_section(role)
+        if section is None:
+            where = "[user] or [judge]" if role == "user" else "[judge]"
+            checks.append(Check(FAIL, f"{who}, but no {where} is set"))
+            continue
+        model = getattr(config, section)
+        if model.url:
+            continue
+        if deploying and (model.swarm_config or model.swarm_name):
+            checks.append(Check(WARN, f"{section}.url is set once its swarm is deployed; the {role} is not checked"))
+        else:
+            checks.append(Check(FAIL, f"{who}, but {section}.url is not set; set it, or serve one with --swarm"))
+    return checks
 
 
 def _read_context_window(config: Config) -> None:

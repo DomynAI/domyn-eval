@@ -70,66 +70,167 @@ def test_unknown_section_raises(tmp_path):
         _load(tmp_path, "[nope]\nx = 1\n")
 
 
-# ── generation: think / nothink ──────────────────────────────────────────────
+# ── generation: modes, roles, context ────────────────────────────────────────
 
 
 def test_reasoning_selects_think_params(config):
-    assert config.generation.mode is config.generation.think
-    assert config.generation.mode.temperature == pytest.approx(0.6)
-    assert config.generation.mode.min_completion_tokens == 16384
+    generation = config.model.generation
+    assert generation.mode is generation.think
+    assert generation.mode.temperature == pytest.approx(0.6)
+    assert generation.context.completion_reserve == 16384
 
 
 def test_reasoning_selects_nothink_params(tmp_path):
     config = _load(
         tmp_path,
         """
-[generation]
+[model.generation]
 reasoning = false
-[generation.think]
+[model.generation.think]
 temperature = 0.6
-[generation.nothink]
+[model.generation.nothink]
 temperature = 0.7
 """,
     )
-    assert config.generation.mode.temperature == pytest.approx(0.7)
+    assert config.model.generation.mode.temperature == pytest.approx(0.7)
 
 
-def test_missing_mode_blocks_keep_the_generation_section(tmp_path):
-    """A [generation] without think/nothink used to reset to defaults."""
+def test_missing_tables_keep_the_others(tmp_path):
     config = _load(
         tmp_path,
         """
-[generation]
+[model.generation.context]
 max_model_len = 1234
-request_timeout = 60
-[generation.think]
+[model.generation.think]
 temperature = 0.6
 """,
     )
-    assert config.generation.max_model_len == 1234
-    assert config.generation.request_timeout == 60
-    assert config.generation.mode.temperature == pytest.approx(0.6)
+    assert config.model.generation.context.max_model_len == 1234
+    assert config.model.generation.mode.temperature == pytest.approx(0.6)
 
 
-@pytest.mark.parametrize(
-    "body",
-    ["", "[generation.think]\ntemperature = 0.6\n"],
-    ids=["no-file-value", "think-block-without-it"],
-)
-def test_min_completion_tokens_defaults_to_none(tmp_path, body):
-    generation = _load(tmp_path, body).generation
-    assert generation.think.min_completion_tokens is None
-    assert generation.nothink.min_completion_tokens is None
+def test_completion_reserve_defaults_to_none(tmp_path):
+    assert _load(tmp_path, "").model.generation.context.completion_reserve is None
 
 
 def test_generation_defaults_match_loading_an_empty_file(tmp_path):
-    assert _load(tmp_path, "").generation == config_module.GenerationConfig()
+    assert _load(tmp_path, "").model.generation == config_module.GenerationConfig()
 
 
-@pytest.mark.parametrize("key", ["temperature", "min_completion_tokens"])
-def test_mode_params_outside_a_mode_block_raise(tmp_path, key):
+def test_the_run_settings_are_general(tmp_path):
+    general = _load(tmp_path, "[general]\nnum_threads = 8\nrequest_timeout = 60\nmax_retries = 2\n").general
+    assert (general.num_threads, general.request_timeout, general.max_retries, general.max_samples) == (8, 60, 2, -1)
+
+
+@pytest.mark.parametrize("key", ["num_threads", "request_timeout", "max_retries", "max_samples"])
+def test_the_run_settings_are_not_a_models(tmp_path, key):
     with pytest.raises(pydantic.ValidationError, match=key):
-        _load(tmp_path, f"[generation]\n{key} = 1\n")
+        _load(tmp_path, f"[model.generation]\n{key} = 1\n")
+
+
+def test_the_old_generation_section_is_unknown(tmp_path):
+    with pytest.raises(ValueError, match=r"unknown config sections \['generation'\]"):
+        _load(tmp_path, "[generation]\nreasoning = true\n")
+
+
+def test_the_judge_is_capped_by_default(tmp_path):
+    assert _load(tmp_path, "").judge.generation.context.max_tokens == 4096
+    assert config_module.Config().judge.generation.context.max_tokens == 4096
+    assert _load(tmp_path, '[judge]\npath = "j"\n').judge.generation.context.max_tokens == 4096
+    context = _load(tmp_path, "[judge.generation.context]\nmax_model_len = 8\n").judge.generation.context
+    assert context.max_tokens == 4096
+
+
+def test_the_judges_cap_can_be_lifted(tmp_path):
+    assert _load(tmp_path, "[judge.generation.context]\nmax_tokens = 0\n").judge.generation.context.max_tokens == 0
+
+
+def test_the_model_under_test_is_not_capped_by_default(tmp_path):
+    assert _load(tmp_path, "").model.generation.context.max_tokens == 0
+
+
+def test_the_roles_default_to_deterministic(tmp_path):
+    judge = _load(tmp_path, "").judge.generation
+    assert (judge.user.temperature, judge.grader.temperature) == (0.0, 0.0)  # as tau2 asks of its user
+
+
+def test_a_role_table_keeps_the_defaults_it_does_not_set(tmp_path):
+    body = "[judge.generation.user]\nchat_template_kwargs = { enable_thinking = false }\n"
+    user = _load(tmp_path, body).judge.generation.user
+    assert (user.temperature, user.chat_template_kwargs) == (0.0, {"enable_thinking": False})
+
+
+def test_a_role_table_overrides_its_defaults(tmp_path):
+    assert _load(tmp_path, "[judge.generation.grader]\ntemperature = 0.2\n").judge.generation.grader.temperature == 0.2
+
+
+def test_a_role_samples_with_its_own_params_over_the_mode(tmp_path):
+    body = """
+[model.generation.think]
+temperature = 1.0
+top_k = 20
+chat_template_kwargs = { enable_thinking = true }
+[model.generation.user]
+top_k = 40
+"""
+    user = _load(tmp_path, body).model.generation.role("user")
+    assert (user.temperature, user.top_k, user.chat_template_kwargs) == (0.0, 40, {"enable_thinking": True})
+
+
+def test_the_judge_inherits_nothing_from_the_model(config):
+    assert config.model.generation.think.temperature is not None
+    assert config.judge.generation.role("user") == config_module.SamplingConfig(temperature=0.0)
+
+
+def test_snapshot_writes_the_judges_generation_for_the_suites(config, tmp_path):
+    config.judge.generation.context.max_tokens = 1024
+    config.judge.generation.user.top_k = 20
+    saved = tomllib.loads(_snapshot(config, tmp_path).read_text())
+    assert saved["judge"]["generation"]["context"]["max_tokens"] == 1024
+    assert saved["judge"]["generation"]["user"] == {"temperature": 0.0, "top_k": 20}
+    assert load_config(tmp_path / "run.config.toml").judge.generation == config.judge.generation
+
+
+def test_the_user_model_is_capped_by_default(tmp_path):
+    assert _load(tmp_path, '[user]\npath = "u"\n').user.generation.context.max_tokens == 4096
+    assert config_module.Config().user.generation.context.max_tokens == 4096
+
+
+@pytest.mark.parametrize(
+    ("body", "user", "grader"),
+    [
+        ("", None, None),
+        ('[judge]\nurl = "http://j:1"\n', "judge", "judge"),
+        ('[judge]\nurl = "http://j:1"\n[user]\nswarm_config = "u.yaml"\n', "user", "judge"),
+        ('[user]\npath = "u"\n', "user", None),
+    ],
+)
+def test_the_user_is_played_by_the_user_model_else_the_judge(tmp_path, body, user, grader):
+    config = _load(tmp_path, body)
+    assert (config.role_section("user"), config.role_section("grader")) == (user, grader)
+
+
+def test_an_unknown_role_raises(config):
+    with pytest.raises(ValueError, match="unknown role 'judge'"):
+        config.role_section("judge")
+
+
+def test_snapshot_writes_the_user_model(config, tmp_path):
+    config.user.path = "u"
+    config.user.generation.user.temperature = 0.5
+    reloaded = load_config(_snapshot(config, tmp_path))
+    assert reloaded.user == config.user
+
+
+def test_sampling_params_outside_a_sampling_table_raise(tmp_path):
+    with pytest.raises(pydantic.ValidationError, match="temperature"):
+        _load(tmp_path, "[model.generation]\ntemperature = 1\n")
+
+
+@pytest.mark.parametrize("key", ["max_tokens", "completion_reserve"])
+def test_a_sampling_table_takes_only_sampling_params(tmp_path, key):
+    with pytest.raises(pydantic.ValidationError, match=key):
+        _load(tmp_path, f"[judge.generation.grader]\n{key} = 1\n")
 
 
 # ── strict sections ──────────────────────────────────────────────────────────
@@ -199,7 +300,7 @@ def test_registered_suite_section_loads(tmp_path):
     assert config.suite.extra.n_threads == 8
 
 
-@pytest.mark.parametrize("name", ["bfcl", "generation"])
+@pytest.mark.parametrize("name", ["bfcl", "judge", "user"])
 def test_register_suite_rejects_taken_names(name):
     with pytest.raises(ValueError, match="reserved or already registered"):
         register_suite(name, ExtraConfig, drivers=UNUSED_DRIVERS)
@@ -266,12 +367,13 @@ def test_load_config_expands_env_vars(tmp_path, monkeypatch):
         """
 [model]
 path = "${_DOMYN_EXPAND_ROOT}/model"
-[generation]
+[model.generation.context]
 tokenizer_path = "${path}/tok"
 """,
     )
     assert config.model.path == "/base/model"
-    assert config.generation.tokenizer_path == "${path}/tok"
+    # [model] encloses the table, so its keys resolve
+    assert config.model.generation.context.tokenizer_path == "/base/model/tok"
 
 
 # ── snapshots ────────────────────────────────────────────────────────────────
@@ -286,27 +388,30 @@ def _snapshot(config, tmp_path):
 def test_snapshot_round_trips(config, tmp_path):
     reloaded = load_config(_snapshot(config, tmp_path))
     assert reloaded.model.url == config.model.url
-    assert reloaded.generation == config.generation
+    assert reloaded.model.generation == config.model.generation
+    assert reloaded.judge == config.judge
     assert reloaded.suite.inspect == config.suite.inspect
     assert reloaded.suite.bfcl == config.suite.bfcl
 
 
 def test_snapshot_persists_runtime_changes(config, tmp_path):
     config.suite.inspect.task = "full"
-    config.generation.tokenizer_path = "/changed"
+    config.model.generation.context.tokenizer_path = "/changed"
     reloaded = load_config(_snapshot(config, tmp_path))
     assert reloaded.suite.inspect.task == "full"
-    assert reloaded.generation.tokenizer_path == "/changed"
+    assert reloaded.model.generation.context.tokenizer_path == "/changed"
 
 
 def test_snapshot_leaves_out_runtime_only_fields(config, tmp_path):
     config.general.run_id = "run-abc123"
+    config.general.max_samples = 5
     config.model.endpoint_max_model_len = 4096
     raw = tomllib.loads(_snapshot(config, tmp_path).read_text())
     assert "run_id" not in raw["general"]
     assert "file" not in raw["general"]
+    assert "max_samples" not in raw["general"]
     assert "endpoint_max_model_len" not in raw["model"]
-    assert raw["generation"]["think"]["temperature"] == pytest.approx(0.6)
+    assert raw["model"]["generation"]["think"]["temperature"] == pytest.approx(0.6)
 
 
 def test_snapshot_writes_used_suites_in_full_at_the_top_level(config, tmp_path):

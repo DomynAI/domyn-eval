@@ -71,7 +71,7 @@ Requests go to `model.url`, authenticated with `API_KEY` when it is set.
 - **`--swarm`**: when `model.url` is unset or down, reuse a running
   [domyn-swarm](https://github.com/DomynAI/domyn-swarm) of the model, or deploy
   one from `model.swarm_config` and tear it down when the run ends. The same
-  goes for the judge of the suites that need one. domyn-swarm takes the
+  goes for the judge and user models the selected tasks need. domyn-swarm takes the
   container image and SLURM account from the site's `defaults.yaml`
   (`DOMYN_SWARM_DEFAULTS`, else `~/.domyn_swarm/defaults.yaml`).
 - **`--sbatch`**: submit each suite as a SLURM job, with the `[slurm]` resources;

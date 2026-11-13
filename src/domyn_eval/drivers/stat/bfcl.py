@@ -78,10 +78,10 @@ class BFCLStatDriver(BaseStatDriver):
 
     def _near_budget(self, prompt: int, completion: int) -> bool:
         """Whether a step reached its budget: ``max_tokens``, cut to what the prompt leaves of the window."""
-        generation = self.config.generation
-        budget = generation.max_tokens
-        window = generation.max_model_len  # the run saves the endpoint's when unset
+        context = self.config.model.generation.context
+        budget = context.max_tokens
+        window = context.max_model_len  # the run saves the endpoint's when unset
         if window:
-            room = window - prompt - generation.token_safety_margin
+            room = window - prompt - context.token_safety_margin
             budget = min(budget or room, room)
         return budget > 0 and completion >= self.profile.near_budget * budget

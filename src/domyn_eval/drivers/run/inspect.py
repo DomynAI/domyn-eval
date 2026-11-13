@@ -4,6 +4,7 @@
 import dataclasses
 import logging
 from pathlib import Path
+from typing import Literal
 
 import tomli_w
 from pydantic import BaseModel, ConfigDict, Field
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class InspectTask(BaseModel):
-    """One ``custom_tasks`` entry: domyn-inspect's ``TaskEntry`` (``configs/config.py``) plus ``judge``."""
+    """One ``custom_tasks`` entry: domyn-inspect's ``TaskEntry`` (``configs/config.py``) plus ``roles``."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -27,7 +28,8 @@ class InspectTask(BaseModel):
     message_limit: int | None = None
     pass_k: int | None = None
     dual_score: bool = False
-    judge: bool = Field(default=False, exclude=True)  # ours, not domyn-inspect's: the task needs a judge swarm
+    # ours, not domyn-inspect's: the model roles the task needs served
+    roles: list[Literal["user", "grader"]] = Field(default=[], exclude=True)
 
 
 class _TasksGeneral(BaseModel):
@@ -75,9 +77,9 @@ class InspectRunDriver(BaseRunDriver):
         return self.config.suite.inspect.task or "inline"
 
     @property
-    def needs_judge(self) -> bool:
-        """Whether any task sets ``judge = true``."""
-        return any(task.judge for task in self.tasks)
+    def roles(self) -> frozenset[str]:
+        """The model roles the tasks name in ``roles``."""
+        return frozenset(role for task in self.tasks for role in task.roles)
 
     @property
     def command_cwd(self) -> Path:
@@ -118,10 +120,10 @@ class InspectRunDriver(BaseRunDriver):
             self.output_dir,
             "--run",
         ]
-        # The suite's max_samples (e.g. set by a recipe entry) overrides generation.max_samples.
+        # The suite's max_samples (e.g. set by a recipe entry) overrides general.max_samples.
         max_samples = self.config.suite.inspect.max_samples
         if max_samples is None:
-            max_samples = self.config.generation.max_samples
+            max_samples = self.config.general.max_samples
         if max_samples > 0:
             args += ["--limit", str(max_samples)]
         return args

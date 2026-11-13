@@ -14,7 +14,7 @@ from typing import Any, TypeVar, cast
 from urllib.parse import urlparse
 
 import tomli_w
-from pydantic import ConfigDict, field_validator
+from pydantic import ConfigDict, ValidationInfo, field_validator
 from pydantic.dataclasses import dataclass
 
 from domyn_eval.paths import UNRESOLVED_REF
@@ -87,6 +87,11 @@ class GeneralConfig:
         log_level: The logging level.
         file: Absolute path of the loaded config, set by ``load_config``.
         recipes_file: The recipes TOML.
+        max_samples: The samples per task; -1 runs them all.
+        num_threads: The concurrent requests of every suite that does not
+            set its own ``num_threads``.
+        request_timeout: The per-request client timeout, in seconds.
+        max_retries: The retries of a failed request.
     """
 
     run_id: str | None = None
@@ -94,11 +99,120 @@ class GeneralConfig:
     log_level: str = "INFO"
     file: str | None = None
     recipes_file: str = "configs/recipes.toml"
+    max_samples: int = -1
+    num_threads: int = 64
+    request_timeout: int = 3600
+    max_retries: int = 0
+
+
+@dataclass(config=_STRICT)
+class SamplingConfig:
+    """The sampling params of a mode (``think``, ``nothink``) or a role (``user``, ``grader``).
+
+    None leaves a param to the endpoint's default, or for a role, to the
+    selected mode.
+
+    Attributes:
+        temperature: The sampling temperature.
+        top_p: The nucleus sampling mass.
+        min_p: The minimum token probability, relative to the top token.
+        top_k: The number of top tokens sampled from.
+        presence_penalty: The penalty on tokens already present.
+        repetition_penalty: The multiplicative penalty on repeated tokens.
+        frequency_penalty: The penalty scaled by a token's count so far.
+        do_sample: Whether to sample rather than decode greedily.
+        chat_template_kwargs: Extra arguments of the chat template, e.g.
+            ``enable_thinking``.
+    """
+
+    temperature: float | None = None
+    top_p: float | None = None
+    min_p: float | None = None
+    top_k: int | None = None
+    presence_penalty: float | None = None
+    repetition_penalty: float | None = None
+    frequency_penalty: float | None = None
+    do_sample: bool | None = None
+    chat_template_kwargs: dict[str, Any] | None = None
+
+
+@dataclass(config=_STRICT)
+class ContextConfig:
+    """``[<model>.generation.context]``: the context window and how it is budgeted.
+
+    Attributes:
+        max_tokens: The cap on each generation; 0 uses what the context
+            window leaves.
+        max_model_len: The context window; 0 reads it from the endpoint.
+        completion_reserve: The completion tokens kept when a long-context
+            prompt is truncated; None keeps 8192 with reasoning, 4096
+            without.
+        token_safety_margin: The tokens kept free when the available token
+            budget is estimated.
+        tokenizer_path: The tokenizer prompt tokens are counted with; None
+            uses the model's path.
+    """
+
+    max_tokens: int = 0
+    max_model_len: int = 0
+    completion_reserve: int | None = None
+    token_safety_margin: int = 256
+    tokenizer_path: str | None = None
+
+
+# Each role's defaults, filled in under what its table sets: deterministic, as tau2 asks of its user simulator.
+_ROLE_DEFAULTS: dict[str, dict[str, Any]] = {"user": {"temperature": 0.0}, "grader": {"temperature": 0.0}}
+
+
+def _sampling(**params: Any) -> Any:  # noqa: ANN401 - a dataclass field
+    """Return a SamplingConfig field whose default sets ``params``."""
+    return dataclasses.field(default_factory=lambda: SamplingConfig(**params))
+
+
+@dataclass(config=_STRICT)
+class GenerationConfig:
+    """``[<model>.generation]``: how a model's requests are built.
+
+    The model under test answers with ``mode``. The judge plays the roles,
+    or the model under test, for want of a judge.
+
+    Attributes:
+        reasoning: Whether the model reasons before answering, which selects
+            ``think`` over ``nothink`` as ``mode``.
+        think: The params used with reasoning.
+        nothink: The params used without reasoning.
+        user: The params of the user it simulates in agentic tasks (tau2),
+            over ``mode``.
+        grader: The params of the grader, over ``mode``.
+        context: The context window and its budget.
+    """
+
+    reasoning: bool = True
+    think: SamplingConfig = _sampling()
+    nothink: SamplingConfig = _sampling()
+    user: SamplingConfig = _sampling(**_ROLE_DEFAULTS["user"])
+    grader: SamplingConfig = _sampling(**_ROLE_DEFAULTS["grader"])
+    context: ContextConfig = dataclasses.field(default_factory=ContextConfig)
+
+    @field_validator("user", "grader", mode="before")
+    @classmethod
+    def _role_defaults(cls, role: Any, info: ValidationInfo) -> Any:  # noqa: ANN401 - a raw table, or a SamplingConfig
+        return {**_ROLE_DEFAULTS[info.field_name], **role} if isinstance(role, dict) else role
+
+    @property
+    def mode(self) -> SamplingConfig:
+        """Return the params of the selected mode."""
+        return self.think if self.reasoning else self.nothink
+
+    def role(self, name: str) -> SamplingConfig:
+        """Return the params of role ``name`` (``user`` or ``grader``): its own, over the selected mode's."""
+        own = {key: value for key, value in dataclasses.asdict(getattr(self, name)).items() if value is not None}
+        return dataclasses.replace(self.mode, **own)
 
 
 @dataclass(config=_STRICT)
 class ModelConfig:
-    """``[model]`` and ``[judge]``: a model and its endpoint.
+    """``[model]``, ``[judge]`` and ``[user]``: a model, its endpoint and its requests.
 
     Attributes:
         swarm_config: The domyn-swarm YAML serving the model.
@@ -111,6 +225,7 @@ class ModelConfig:
             missing. Set by the swarm handler for a swarm-served model.
         endpoint_max_model_len: The context window read from the endpoint at
             run time.
+        generation: How its requests are built.
     """
 
     swarm_config: str | None = None
@@ -120,6 +235,7 @@ class ModelConfig:
     path: str = ""
     url: str | None = None
     endpoint_max_model_len: int | None = None
+    generation: GenerationConfig = dataclasses.field(default_factory=GenerationConfig)
 
     @field_validator("url")
     @classmethod
@@ -128,6 +244,11 @@ class ModelConfig:
             return None
         url = url.rstrip("/")
         return url if url.endswith("/v1") else f"{url}/v1"
+
+    @property
+    def is_set(self) -> bool:
+        """Whether the section names a model: a path, url, swarm config or swarm name."""
+        return bool(self.path or self.url or self.swarm_config or self.swarm_name)
 
     @property
     def endpoint_port(self) -> int | None:
@@ -146,78 +267,25 @@ class ModelConfig:
         return parsed.hostname
 
 
-@dataclass(config=_STRICT)
-class GenerationModeConfig:
-    """``[generation.think]`` and ``[generation.nothink]``: per-mode params.
+# The defaults of [judge] and [user] that differ from a model's, filled in under what they set: a looping judge would
+# otherwise write up to its whole context window into the conversation.
+_ROLE_MODEL_DEFAULTS: dict[str, Any] = {"generation": {"context": {"max_tokens": 4096}}}
 
-    None leaves a sampling param to the endpoint's default.
-
-    Attributes:
-        temperature: The sampling temperature.
-        top_p: The nucleus sampling mass.
-        min_p: The minimum token probability, relative to the top token.
-        top_k: The number of top tokens sampled from.
-        presence_penalty: The penalty on tokens already present.
-        repetition_penalty: The multiplicative penalty on repeated tokens.
-        frequency_penalty: The penalty scaled by a token's count so far.
-        do_sample: Whether to sample rather than decode greedily.
-        chat_template_kwargs: Extra arguments of the chat template, e.g.
-            ``enable_thinking``.
-        system_prompt_template: The system prompt; ``{instruction}`` is the
-            task's own.
-        min_completion_tokens: The completion budget kept when a
-            long-context prompt is truncated; None keeps none.
-    """
-
-    temperature: float | None = None
-    top_p: float | None = None
-    min_p: float | None = None
-    top_k: int | None = None
-    presence_penalty: float | None = None
-    repetition_penalty: float | None = None
-    frequency_penalty: float | None = None
-    do_sample: bool | None = None
-    chat_template_kwargs: dict[str, Any] | None = None
-    system_prompt_template: str = "{instruction}"
-    min_completion_tokens: int | None = None
+# The model roles tasks can need: tau2's simulated user, and the grader of model-graded scorers.
+ROLES = ("user", "grader")
 
 
-@dataclass(config=_STRICT)
-class GenerationConfig:
-    """``[generation]``: how requests are built.
+def _with_defaults(raw: dict[str, Any], defaults: dict[str, Any]) -> dict[str, Any]:
+    """Return ``raw`` with ``defaults`` filled in where it sets nothing, table by table."""
+    merged = {**defaults, **raw}
+    for key, default in defaults.items():
+        if isinstance(default, dict) and isinstance(raw.get(key), dict):
+            merged[key] = _with_defaults(raw[key], default)
+    return merged
 
-    Attributes:
-        reasoning: Whether the model reasons before answering, which selects
-            ``think`` over ``nothink`` as ``mode``.
-        think: The params used with reasoning.
-        nothink: The params used without reasoning.
-        max_tokens: The completion budget; 0 uses what the context allows.
-        max_model_len: The context window; 0 reads it from the endpoint.
-        token_safety_margin: Number of tokens to keep free when estimating the available token budget.
-        request_timeout: The per-request client timeout, in seconds.
-        max_retries: The retries of a failed request.
-        max_samples: The samples per task; -1 runs them all.
-        num_threads: The concurrent requests of every suite that does
-            not set its own ``num_threads``.
-        tokenizer_path: The tokenizer used to count prompt tokens.
-    """
 
-    reasoning: bool = True
-    think: GenerationModeConfig = dataclasses.field(default_factory=GenerationModeConfig)
-    nothink: GenerationModeConfig = dataclasses.field(default_factory=GenerationModeConfig)
-    max_tokens: int = 0
-    max_model_len: int = 0
-    token_safety_margin: int = 256
-    request_timeout: int = 3600
-    max_retries: int = 0
-    max_samples: int = -1
-    num_threads: int = 64
-    tokenizer_path: str | None = None
-
-    @property
-    def mode(self) -> GenerationModeConfig:
-        """Return the params of the selected mode."""
-        return self.think if self.reasoning else self.nothink
+def _default_role_model() -> ModelConfig:
+    return ModelConfig(**_with_defaults({}, _ROLE_MODEL_DEFAULTS))
 
 
 def _sbatch(option: str) -> Any:  # noqa: ANN401 - a dataclass field
@@ -274,9 +342,9 @@ class InspectConfig:
         task: The name of the task group, set by recipe entries.
         custom_tasks: The tasks to run, as recipe entries define them.
         max_samples: The samples per task of the task group; overrides
-            ``generation.max_samples``.
+            ``general.max_samples``.
         num_threads: The concurrent requests, inspect's
-            ``max_connections``; overrides ``generation.num_threads``.
+            ``max_connections``; overrides ``general.num_threads``.
         max_tasks: The tasks run in parallel.
         fail_on_error: Whether a failed sample fails its task; a float is
             the tolerated error rate.
@@ -285,9 +353,9 @@ class InspectConfig:
         retry_attempts: The retries of a failed task.
         retry_wait: The seconds between task retries.
         request_timeout: The read timeout of inspect's client, in seconds;
-            overrides ``generation.request_timeout``.
+            overrides ``general.request_timeout``.
         max_tokens: The completion budget of the tasks; overrides
-            ``generation.max_tokens``.
+            ``model.generation.context.max_tokens``.
     """
 
     path: str = "suites/domyn-inspect"
@@ -325,7 +393,7 @@ class BFCLConfig:
             than tools described in the prompt.
         model_class: The BFCL handler class; None picks the default one.
         num_threads: The concurrent requests; overrides
-            ``generation.num_threads``.
+            ``general.num_threads``.
     """
 
     path: str = "suites/domyn-bfcl"
@@ -346,7 +414,7 @@ class LMEvalConfig:
         batch_size: The requests per batch, or ``auto``; None uses
             lm-eval's default.
         num_threads: The concurrent requests, lm-eval's
-            ``num_concurrent``; overrides ``generation.num_threads``.
+            ``num_concurrent``; overrides ``general.num_threads``.
         log_samples: Whether to write every sample to the results.
         max_seq_lengths: The context lengths of the RULER tasks.
         chat_completions: Whether to use the chat endpoint, which applies the
@@ -381,7 +449,7 @@ class SuiteDrivers:
     stat: str | None = None
 
 
-_RESERVED_SECTIONS = frozenset({"general", "model", "judge", "generation", "slurm"})
+_RESERVED_SECTIONS = frozenset({"general", "model", "judge", "user", "slurm"})
 _SUITES: dict[str, type] = {}
 _DRIVERS: dict[str, SuiteDrivers] = {}
 _ENTRY_CHECKS: dict[str, Callable[[list[Any]], None]] = {}
@@ -533,7 +601,8 @@ _RUNTIME_ONLY = (
     "general.run_id",
     "model.endpoint_max_model_len",
     "judge.endpoint_max_model_len",
-    "generation.max_samples",
+    "user.endpoint_max_model_len",
+    "general.max_samples",
 )
 
 
@@ -544,18 +613,40 @@ class Config:
     Attributes:
         general: The ``[general]`` section.
         model: The model under evaluation.
-        judge: The model grading answers, for suites that use one.
-        generation: The ``[generation]`` section.
+        judge: The model grading answers, and playing the user unless
+            ``user`` is set, for tasks that need one.
+        user: The model playing the user, if not the judge.
         slurm: The ``[slurm]`` section.
         suite: The sections of the registered suites.
     """
 
     general: GeneralConfig = dataclasses.field(default_factory=GeneralConfig)
     model: ModelConfig = dataclasses.field(default_factory=ModelConfig)
-    judge: ModelConfig = dataclasses.field(default_factory=ModelConfig)
-    generation: GenerationConfig = dataclasses.field(default_factory=GenerationConfig)
+    judge: ModelConfig = dataclasses.field(default_factory=_default_role_model)
+    user: ModelConfig = dataclasses.field(default_factory=_default_role_model)
     slurm: SlurmConfig = dataclasses.field(default_factory=SlurmConfig)
     suite: SuiteConfig = dataclasses.field(default_factory=SuiteConfig)
+
+    @field_validator("judge", "user", mode="before")
+    @classmethod
+    def _role_model_defaults(cls, section: Any) -> Any:  # noqa: ANN401 - a raw table, or a ModelConfig left as is
+        """Fill in what ``[judge]`` and ``[user]`` leave unset with their defaults, e.g. a 4096-token cap."""
+        return _with_defaults(section, _ROLE_MODEL_DEFAULTS) if isinstance(section, dict) else section
+
+    def role_section(self, role: str) -> str | None:
+        """Return the section of the model playing ``role``: ``user`` if set, else ``judge``, for the user.
+
+        None if no section is set for it; the model under test then plays the user, and inspect's default grades.
+
+        Args:
+            role: One of ``ROLES``.
+        """
+        if role not in ROLES:
+            msg = f"unknown role {role!r}; the roles are {list(ROLES)}"
+            raise ValueError(msg)
+        if role == "user" and self.user.is_set:
+            return "user"
+        return "judge" if self.judge.is_set else None
 
     def save(self, path: str | os.PathLike[str]) -> None:
         """Write the config at ``path``, merged into the file if it exists.
@@ -588,15 +679,6 @@ class Config:
         tmp.replace(path)
 
 
-def _load_generation(raw: dict[str, Any]) -> GenerationConfig:
-    raw = dict(raw)
-    return GenerationConfig(
-        think=GenerationModeConfig(**raw.pop("think", {})),
-        nothink=GenerationModeConfig(**raw.pop("nothink", {})),
-        **raw,
-    )
-
-
 def load_config(path: str | os.PathLike[str]) -> Config:
     """Load and validate a config TOML.
 
@@ -617,8 +699,8 @@ def load_config(path: str | os.PathLike[str]) -> Config:
     return Config(
         general=GeneralConfig(**general),
         model=ModelConfig(**raw.pop("model", {})),
-        judge=ModelConfig(**raw.pop("judge", {})),
-        generation=_load_generation(raw.pop("generation", {})),
+        judge=raw.pop("judge", {}),
+        user=raw.pop("user", {}),
         slurm=SlurmConfig(**raw.pop("slurm", {})),
         suite=SuiteConfig(raw),
     )

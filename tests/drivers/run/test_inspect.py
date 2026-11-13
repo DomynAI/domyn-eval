@@ -1,6 +1,7 @@
 """Tests for the inspect run driver."""
 
 import copy
+import subprocess
 import tomllib
 from pathlib import Path
 
@@ -203,3 +204,93 @@ def test_build_command_runs_no_setup(config: Config, monkeypatch: pytest.MonkeyP
     config.suite.inspect.custom_tasks = [{"task": "inspect_evals/gsm8k"}]
     InspectRunDriver(config).build_command()
     assert calls == []
+
+
+@pytest.fixture
+def task_package(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A local task package folder, named relative to the working directory as a recipe would."""
+    (tmp_path / "my-tasks").mkdir()
+    monkeypatch.chdir(tmp_path)
+    return tmp_path / "my-tasks"
+
+
+def test_setup_installs_the_task_packages_editable_without_dependencies(
+    config: Config, monkeypatch: pytest.MonkeyPatch, task_package: Path
+) -> None:
+    calls = _stub_commands(monkeypatch)
+    config.suite.inspect.custom_tasks = [{"task": "my_tasks/a"}]
+    config.suite.inspect.task_packages = [task_package.name]
+    driver = InspectRunDriver(config)
+    driver.setup()
+    sync, install, prefetch = calls
+    assert sync == ["uv", "sync"]
+    assert install[:3] == ["uv", "pip", "install"]
+    assert install[install.index("--python") + 1] == str(driver.python)
+    assert "--no-deps" in install
+    # absolute, as the commands run in the suite's folder
+    assert install[install.index("--editable") + 1] == str(task_package)
+    assert "domyn_inspect.prefetch.prefetch_datasets" in prefetch
+
+
+_TASK_PACKAGE_FILES = {
+    "pyproject.toml": """\
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "my-tasks"
+version = "0.0.0"
+
+[project.entry-points.inspect_ai]
+my_tasks = "my_tasks._registry"
+""",
+    "my_tasks/__init__.py": "",
+    "my_tasks/_registry.py": "from my_tasks.a import a  # noqa: F401\n",
+    "my_tasks/a.py": """\
+from inspect_ai import Task, task
+from inspect_ai.dataset import Sample
+
+
+@task
+def a() -> Task:
+    return Task(dataset=[Sample(input="1 + 1?", target="2")])
+""",
+}
+
+
+def test_installed_task_package_registers_its_tasks_with_inspect(
+    config: Config, monkeypatch: pytest.MonkeyPatch, task_package: Path
+) -> None:
+    # task_package moved the working directory, which relative suite paths resolve from
+    monkeypatch.setenv("SUITES_BASE_DIR", str(Path(__file__).parents[3]))
+    driver = InspectRunDriver(config)
+    suite_python = driver.python
+    if not suite_python.is_file():
+        pytest.skip("suites/domyn-inspect has no environment")
+    for name, text in _TASK_PACKAGE_FILES.items():
+        (task_package / name).parent.mkdir(parents=True, exist_ok=True)
+        (task_package / name).write_text(text)
+    # A throwaway venv that sees the suite's packages, so the install leaves the suite's own environment untouched.
+    venv = task_package.parent / "venv"
+    subprocess.run(["uv", "venv", "--quiet", "--python", str(suite_python), str(venv)], check=True)
+    [suite_site] = suite_python.parents[1].glob("lib/python*/site-packages")
+    [venv_site] = venv.glob("lib/python*/site-packages")
+    (venv_site / "suite.pth").write_text(f"{suite_site}\n")
+    driver.python = venv / "bin" / "python"
+    config.suite.inspect.task_packages = [task_package.name]
+
+    subprocess.run(driver._install_ext_task_packages(), cwd=driver.command_cwd, check=True)
+
+    lookup = (
+        "from inspect_ai._util.registry import registry_info, registry_lookup\n"
+        "print(registry_info(registry_lookup('task', 'my_tasks/a')).name)"
+    )
+    found = subprocess.run([driver.python, "-c", lookup], capture_output=True, text=True, cwd=task_package.parent)
+    assert found.returncode == 0, found.stderr
+    assert found.stdout.strip() == "my_tasks/a"
+
+
+def test_build_command_without_task_packages_runs_domyn_inspect_directly(config: Config) -> None:
+    config.suite.inspect.custom_tasks = [{"task": "inspect_evals/gsm8k"}]
+    assert InspectRunDriver(config).build_command()[1:3] == ["-m", "domyn_inspect"]

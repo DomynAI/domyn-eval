@@ -62,11 +62,11 @@ def test_run_id_is_generated_and_shared_through_the_config(config: Config) -> No
 
 
 def test_write_config_saves_the_resolved_window(config: Config) -> None:
-    config.generation.max_model_len = 0
+    config.model.generation.context.max_model_len = 0
     config.model.endpoint_max_model_len = 65536
     path = DemoDriver(config).write_config()
-    assert tomllib.loads(path.read_text())["generation"]["max_model_len"] == 65536
-    assert config.generation.max_model_len == 0  # the shared config keeps its own value
+    assert tomllib.loads(path.read_text())["model"]["generation"]["context"]["max_model_len"] == 65536
+    assert config.model.generation.context.max_model_len == 0  # the shared config keeps its own value
 
 
 def test_write_config_keeps_every_written_suites_section(config: Config) -> None:

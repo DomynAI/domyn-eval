@@ -64,7 +64,7 @@ def _run(
     run_dir = runs / "m" / run
     (run_dir / "results" / suite).mkdir(parents=True)
     (run_dir / "results" / suite / "samples.json").write_text(json.dumps([s.model_dump() for s in samples]))
-    config.generation.reasoning = reasoning
+    config.model.generation.reasoning = reasoning
     config.save(run_dir / "config.toml")
 
 

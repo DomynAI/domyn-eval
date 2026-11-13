@@ -163,7 +163,7 @@ def test_max_tokens_reaches_the_request_and_zero_sends_no_cap(
     config.model.url = "http://localhost:8000/v1"
     config.suite.lm_eval.task = "task"
     config.suite.lm_eval.chat_completions = chat_completions
-    config.generation.max_tokens = max_tokens
+    config.model.generation.context.max_tokens = max_tokens
     args_file = Path(LMEvalRunDriver(config).build_command()[-1])
     gen_kwargs = lmeval._LMEvalArgs.model_validate_json(args_file.read_text()).gen_kwargs.model_dump(exclude_none=True)
 
@@ -232,7 +232,7 @@ def test_args_require_a_known_context_window(config: Config, tmp_path: Path, mon
     monkeypatch.setenv("RUNS_DIR", str(tmp_path))
     config.model.url = "http://localhost:8000/v1"
     config.suite.lm_eval.task = "task"
-    config.generation.max_model_len = 0
+    config.model.generation.context.max_model_len = 0
     config.model.endpoint_max_model_len = None
     with pytest.raises(ValueError, match="context window is unknown"):
         LMEvalRunDriver(config)._lmeval_args()

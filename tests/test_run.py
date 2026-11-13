@@ -9,7 +9,7 @@ from domyn_eval import run as run_module
 from domyn_eval.cli import cli
 from domyn_eval.config import Config
 from domyn_eval.drivers.run.base import BaseRunDriver
-from domyn_eval.preflight import FAIL, OK, Check
+from domyn_eval.preflight import FAIL, OK, WARN, Check
 from domyn_eval.run import Entry, RunOptions, run
 from domyn_eval.swarm import SwarmHandler
 
@@ -38,7 +38,7 @@ def config(config: Config) -> Config:
 
 @pytest.fixture(autouse=True)
 def drivers(calls: Calls, monkeypatch: pytest.MonkeyPatch) -> dict[str, dict]:
-    """Fake run drivers: ``behaviour[suite]`` sets a suite's exit code, setup error and judge."""
+    """Fake run drivers: ``behaviour[suite]`` sets a suite's exit code, setup error and roles."""
     behaviour: dict[str, dict] = {}
 
     def driver_class(suite: str) -> type[BaseRunDriver]:
@@ -48,8 +48,8 @@ def drivers(calls: Calls, monkeypatch: pytest.MonkeyPatch) -> dict[str, dict]:
                 return suite
 
             @property
-            def needs_judge(self) -> bool:
-                return behaviour.get(suite, {}).get("judge", False)
+            def roles(self) -> frozenset[str]:
+                return frozenset(behaviour.get(suite, {}).get("roles", ()))
 
             def setup(self) -> None:
                 calls.append(("setup", suite))
@@ -74,7 +74,7 @@ class FakeHandler:
 
     def __init__(self, config: Config, calls: Calls):
         self.config, self.calls = config, calls
-        self.fresh_model_swarm = self.fresh_judge_swarm = None
+        self.fresh: dict[SwarmHandler.ModelType, SimpleNamespace] = {}
 
     def ensure_endpoint(self, model_type: SwarmHandler.ModelType, dry: bool) -> None:
         self.calls.append(("ensure", model_type.value, dry))
@@ -82,15 +82,14 @@ class FakeHandler:
         if section.url or dry:
             return
         section.url = f"http://{model_type.value}-node:8000"
-        setattr(self, f"fresh_{model_type.value}_swarm", SimpleNamespace(name=f"{model_type.value}-swarm"))
+        self.fresh[model_type] = SimpleNamespace(name=f"{model_type.value}-swarm")
 
     def down(self, model_type: SwarmHandler.ModelType) -> bool:
         self.calls.append(("down", model_type.value))
-        return getattr(self, f"fresh_{model_type.value}_swarm") is not None
+        return model_type in self.fresh
 
     def deployed_swarms(self) -> dict[SwarmHandler.ModelType, str]:
-        swarms = {t: getattr(self, f"fresh_{t.value}_swarm") for t in self.ModelType}
-        return {t: swarm.name for t, swarm in swarms.items() if swarm is not None}
+        return {t: swarm.name for t, swarm in self.fresh.items()}
 
 
 @pytest.fixture
@@ -152,7 +151,7 @@ def test_the_runs_config_holds_every_suite_of_the_run(config: Config, runs: Path
 
     assert saved["bfcl"]["test_category"] == "simple"
     assert "lm_eval" in saved
-    assert saved["generation"]["max_model_len"] == 32768
+    assert saved["model"]["generation"]["context"]["max_model_len"] == 32768
 
 
 def test_a_suites_entries_each_log_to_their_own_file(config: Config, runs: Path) -> None:
@@ -216,7 +215,7 @@ def test_a_failed_preflight_runs_nothing(config: Config, calls: Calls, preflight
 def test_an_entry_needing_a_judge_fails_the_preflight_without_one(
     config: Config, calls: Calls, drivers: dict[str, dict]
 ) -> None:
-    drivers["inspect"] = {"judge": True}
+    drivers["inspect"] = {"roles": ["user"]}
     config.judge.url = None
 
     assert run(config, [Entry("inspect")], RunOptions()) == 1
@@ -232,7 +231,7 @@ def test_a_swarm_the_run_deploys_comes_down_when_it_ends(config: Config, calls: 
 
     assert calls[0] == ("ensure", "model", False)
     assert config.model.url == "http://model-node:8000/v1"
-    assert calls[-2:] == [("down", "model"), ("down", "judge")]
+    assert calls[-3:] == [("down", "model"), ("down", "judge"), ("down", "user")]
 
 
 @pytest.mark.usefixtures("runs", "swarm")
@@ -251,7 +250,7 @@ def test_a_swarm_comes_down_when_the_preflight_fails(config: Config, calls: Call
 
     assert run(config, [Entry("bfcl")], RunOptions(swarm=True)) == 1
 
-    assert calls[-2:] == [("down", "model"), ("down", "judge")]
+    assert calls[-3:] == [("down", "model"), ("down", "judge"), ("down", "user")]
 
 
 @pytest.mark.usefixtures("runs", "swarm")
@@ -261,9 +260,72 @@ def test_the_judge_is_served_only_for_entries_that_need_one(
     run(config, [Entry("bfcl")], RunOptions(swarm=True, check=False))
     assert ("ensure", "judge", False) not in calls
 
-    drivers["inspect"] = {"judge": True}
+    drivers["inspect"] = {"roles": ["grader"]}
     run(config, [Entry("inspect")], RunOptions(swarm=True, check=False))
     assert ("ensure", "judge", False) in calls
+
+
+@pytest.mark.usefixtures("runs", "swarm")
+@pytest.mark.parametrize(
+    ("roles", "served"),
+    [(["user"], ["user"]), (["grader"], ["judge"]), (["user", "grader"], ["judge", "user"])],
+)
+def test_a_user_model_is_served_for_the_user_and_the_judge_for_the_grader(
+    config: Config, calls: Calls, drivers: dict[str, dict], roles: list[str], served: list[str]
+) -> None:
+    config.user.swarm_config = "user.yaml"
+    drivers["inspect"] = {"roles": roles}
+
+    run(config, [Entry("inspect")], RunOptions(swarm=True, check=False))
+
+    assert [c[1] for c in calls if c[0] == "ensure"] == ["model", *served]
+
+
+@pytest.mark.usefixtures("runs", "swarm")
+def test_without_a_user_model_the_judge_is_served_for_the_user(
+    config: Config, calls: Calls, drivers: dict[str, dict]
+) -> None:
+    drivers["inspect"] = {"roles": ["user"]}
+
+    run(config, [Entry("inspect")], RunOptions(swarm=True, check=False))
+
+    assert [c[1] for c in calls if c[0] == "ensure"] == ["model", "judge"]
+
+
+@pytest.mark.parametrize(
+    ("role", "message"),
+    [
+        ("user", "need a user model, but no [user] or [judge] is set"),
+        ("grader", "need a grader model, but no [judge] is set"),
+    ],
+)
+def test_a_role_no_section_plays_fails(config: Config, role: str, message: str) -> None:
+    config.judge.url = None
+
+    checks = run_module._check_roles(config, {role: ["inspect"]}, deploying=False)
+
+    assert [(c.level, c.message) for c in checks] == [(FAIL, f"inspect: {message}")]
+
+
+def test_a_role_model_about_to_be_deployed_only_warns(config: Config) -> None:
+    config.judge.url = None
+    config.user.swarm_config = "user.yaml"
+
+    checks = run_module._check_roles(config, {"user": ["inspect"], "grader": ["inspect"]}, deploying=True)
+
+    assert [c.level for c in checks] == [WARN, FAIL]  # the judge has nothing to deploy
+
+
+@pytest.mark.usefixtures("runs", "preflight")
+def test_a_user_model_without_an_endpoint_fails_the_preflight(
+    config: Config, calls: Calls, drivers: dict[str, dict]
+) -> None:
+    config.user.path = "user-model"  # set, so it plays the user, but not served
+    drivers["inspect"] = {"roles": ["user"]}
+
+    assert run(config, [Entry("inspect")], RunOptions()) == 1
+
+    assert _ran(calls) == []
 
 
 def _sbatch_calls(sbatch: Path) -> list[list[str]]:

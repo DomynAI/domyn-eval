@@ -36,7 +36,7 @@ class BaseRunDriver(ABC):
     @property
     def max_model_len(self) -> int:
         """Context window for this run; 0 means "unknown"."""
-        return self.config.generation.max_model_len or self.config.model.endpoint_max_model_len or 0
+        return self.config.model.generation.context.max_model_len or self.config.model.endpoint_max_model_len or 0
 
     @property
     def config_file(self) -> Path:
@@ -44,9 +44,9 @@ class BaseRunDriver(ABC):
         return (run_dir(self.model_id, self.run_id) / "config.toml").absolute()
 
     @property
-    def needs_judge(self) -> bool:
-        """Whether a run of this suite needs a judge swarm brought up."""
-        return False
+    def roles(self) -> frozenset[str]:
+        """The model roles (``config.ROLES``) a run of this suite needs served."""
+        return frozenset()
 
     @property
     def log_dir(self) -> Path:
@@ -99,7 +99,7 @@ class BaseRunDriver(ABC):
         """Save the run's resolved config, with this suite's section and the context window.
 
         The suite is marked used on the shared config, so the file keeps the sections of every suite the run has
-        written so far. ``max_model_len`` is added to ``generation.max_model_len``.
+        written so far. ``max_model_len`` is added to ``model.generation.context.max_model_len``.
 
         Args:
             path: Where to save it; ``config_file`` by default.
@@ -110,7 +110,7 @@ class BaseRunDriver(ABC):
         path = path or self.config_file
         self.config.suite.use(self.suite)
         config = copy.deepcopy(self.config)
-        config.generation.max_model_len = self.max_model_len
+        config.model.generation.context.max_model_len = self.max_model_len
         config.save(path)
         return path
 

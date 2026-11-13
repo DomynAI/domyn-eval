@@ -99,13 +99,13 @@ def test_a_relative_local_model_path_is_passed_absolute(
 def test_partial_eval_only_when_samples_are_capped(config: Config) -> None:
     _, evaluate = _commands(config)
     assert "--partial-eval" not in evaluate
-    config.generation.max_samples = 5
+    config.general.max_samples = 5
     _, evaluate = _commands(config)
     assert "--partial-eval" in evaluate
 
 
 def test_num_threads_prefers_the_suites_own(config: Config) -> None:
-    config.generation.num_threads = 16
+    config.general.num_threads = 16
     generate, _ = _commands(config)
     assert _option(generate, "--num-threads") == "16"
     config.suite.bfcl.num_threads = 4
@@ -123,19 +123,19 @@ def test_generation_config_carries_the_modes_params_and_the_budget(config: Confi
     assert sent["reasoning"] is True
     assert sent["max_model_len"] == 32768
     assert sent["max_tokens"] == 1024
-    assert sent["token_safety_margin"] == config.generation.token_safety_margin
-    assert sent["request_timeout"] == config.generation.request_timeout
+    assert sent["token_safety_margin"] == config.model.generation.context.token_safety_margin
+    assert sent["request_timeout"] == config.general.request_timeout
 
 
 def test_generation_config_follows_nothink(config: Config) -> None:
-    config.generation.reasoning = False
+    config.model.generation.reasoning = False
     sent = json.loads(_option(_commands(config)[0], "--generation-config"))
     assert sent["temperature"] == 0.7
     assert sent["chat_template_kwargs"] == {"enable_thinking": False}
 
 
 def test_an_unset_max_tokens_is_sent_as_null(config: Config) -> None:
-    config.generation.max_tokens = 0
+    config.model.generation.context.max_tokens = 0
     sent = json.loads(_option(_commands(config)[0], "--generation-config"))
     assert sent["max_tokens"] is None  # domyn-bfcl then budgets the whole window
 
@@ -154,7 +154,7 @@ def test_bfcl_project_root_is_the_runs_folder(config: Config) -> None:
 
 
 def test_command_env_passes_the_tokenizer(config: Config) -> None:
-    config.generation.tokenizer_path = "/models/tok"
+    config.model.generation.context.tokenizer_path = "/models/tok"
     assert BFCLRunDriver(config).command_env["REMOTE_OPENAI_TOKENIZER_PATH"] == "/models/tok"
 
 

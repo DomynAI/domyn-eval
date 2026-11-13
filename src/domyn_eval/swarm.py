@@ -182,33 +182,30 @@ def _load_swarm_config(path: str | None) -> domyn_swarm.DomynLLMSwarmConfig | No
 class SwarmHandler:
     """Deploys, stops and finds domyn-swarm deployments."""
 
-    fresh_model_swarm: DomynLLMSwarm | None = None  # swarm deployed by this handler for the main model
-    fresh_judge_swarm: DomynLLMSwarm | None = None  # swarm deployed by this handler for the judge model
-
     def __init__(self, config: Config):
-        """Build a handler for a config with a [model] and an optional [judge] section.
+        """Build a handler for a config with a [model] and optional [judge] and [user] sections.
 
         Raises:
             ValueError: If the model has no swarm config, url or live swarm.
         """
         self.config = config
-        self.model_swarm_config = _load_swarm_config(config.model.swarm_config)
-        self.judge_swarm_config = _load_swarm_config(config.judge.swarm_config)
+        self.swarm_configs = {
+            model_type: _load_swarm_config(getattr(config, model_type.value).swarm_config)
+            for model_type in SwarmHandler.ModelType
+        }
+        self.fresh_swarms: dict[SwarmHandler.ModelType, DomynLLMSwarm] = {}  # the swarms this handler deployed
         self._check_section(SwarmHandler.ModelType.MODEL)
 
     class ModelType(Enum):
-        """Enum for model types."""
+        """The config sections a swarm can serve."""
 
         MODEL = "model"
         JUDGE = "judge"
+        USER = "user"
 
     def _get_configs(self, model_type: ModelType) -> tuple[domyn_swarm.DomynLLMSwarmConfig | None, ModelConfig]:
-        """Get the swarm configs for the model type."""
-        match model_type:
-            case SwarmHandler.ModelType.MODEL:
-                return self.model_swarm_config, self.config.model
-            case SwarmHandler.ModelType.JUDGE:
-                return self.judge_swarm_config, self.config.judge
+        """Get the swarm config and the config section of the model type."""
+        return self.swarm_configs[model_type], getattr(self.config, model_type.value)
 
     def _check_section(self, model_type: ModelType) -> None:
         """Raise ValueError unless the section has a swarm config to deploy, a url, or a live swarm."""
@@ -226,7 +223,7 @@ class SwarmHandler:
         raise ValueError(msg)
 
     def up(self, model_type: ModelType) -> None:
-        """Deploy a swarm for the given model type (either MODEL or JUDGE).
+        """Deploy a swarm for the given model type.
 
         Fill up the model configuration with the informaton about the deployed swarm.
         """
@@ -250,11 +247,7 @@ class SwarmHandler:
         config.path = model_path
         config.name = model_name
         config.url = endpoint  # if /v1 is missing, it's already added by field validator method in ModelConfig
-        match model_type:
-            case SwarmHandler.ModelType.MODEL:
-                self.fresh_model_swarm = swarm
-            case SwarmHandler.ModelType.JUDGE:
-                self.fresh_judge_swarm = swarm
+        self.fresh_swarms[model_type] = swarm
 
     def down(self, model_type: ModelType) -> bool:
         """Stop a swarm.
@@ -262,26 +255,15 @@ class SwarmHandler:
         Note that this method only tears down a swarm that was deployed by
         this handler, to prevent stopping swarms being potentially used by other clients.
         """
-
-        def shutdown_swarm(swarm: DomynLLMSwarm | None) -> bool:
-            if swarm:
-                swarm.cleanup()
-                return True
+        swarm = self.fresh_swarms.get(model_type)
+        if swarm is None:
             return False
-
-        match model_type:
-            case SwarmHandler.ModelType.MODEL:
-                return shutdown_swarm(self.fresh_model_swarm)
-            case SwarmHandler.ModelType.JUDGE:
-                return shutdown_swarm(self.fresh_judge_swarm)
+        swarm.cleanup()
+        return True
 
     def deployed_swarms(self) -> dict[ModelType, str]:
         """Names of the swarms this handler deployed, which are the ones to tear down, by model type."""
-        swarms = {
-            SwarmHandler.ModelType.MODEL: self.fresh_model_swarm,
-            SwarmHandler.ModelType.JUDGE: self.fresh_judge_swarm,
-        }
-        return {model_type: swarm.name for model_type, swarm in swarms.items() if swarm is not None}
+        return {model_type: swarm.name for model_type, swarm in self.fresh_swarms.items()}
 
     def find(self, model_type: ModelType, poll_interval: float | None = None) -> tuple[str, ServingStatus] | None:
         """Find a running swarm, waiting at most ``timeout`` seconds for starting ones."""
@@ -298,7 +280,7 @@ class SwarmHandler:
         2. Otherwise, try to reuse and existing running swarm for the model
         3. If there is no swarm available, spawn a new swarm
         """
-        if model_type is SwarmHandler.ModelType.JUDGE:
+        if model_type is not SwarmHandler.ModelType.MODEL:
             self._check_section(model_type)  # the model's is checked on construction
         _, config = self._get_configs(model_type)
         if config.url and endpoint_is_live(config.url):
@@ -332,7 +314,7 @@ class SwarmHandler:
         return True
 
     def _fill_from_swarm(self, name: str, *, model_type: ModelType, endpoint: str | None = None) -> str | None:
-        """Fill a ``[model]``/``[judge]`` section in place from a deployed swarm.
+        """Fill a ``[model]``/``[judge]``/``[user]`` section in place from a deployed swarm.
 
         ``name`` is one exact deployment name, as ``domyn-swarm swarm list`` prints it.
         ``endpoint`` (a live status URL) wins over the recorded one, which is missing when

@@ -66,7 +66,7 @@ class ModelStats:
                 except FileNotFoundError:
                     logger.warning("%s: run %s has no config.toml; no stats", suite, run)
                     continue
-                reasoning = stats.config.generation.reasoning
+                reasoning = stats.config.model.generation.reasoning
                 rows += [RunStats(suite, run, r, r.warnings(stats.profile, reasoning=reasoning)) for r in stats.stats()]
         return cls(model, rows)
 

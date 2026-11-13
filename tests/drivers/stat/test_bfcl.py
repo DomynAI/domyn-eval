@@ -12,8 +12,8 @@ from tests.drivers.stat.helpers import normal_sample
 
 @pytest.fixture
 def config(config: Config) -> Config:
-    config.generation.max_tokens = 1024
-    config.generation.max_model_len = 32768
+    config.model.generation.context.max_tokens = 1024
+    config.model.generation.context.max_model_len = 32768
     return config
 
 
@@ -84,7 +84,7 @@ def test_only_scored_leaderboard_categories_count(driver: BFCLStatDriver) -> Non
 def test_truncation_is_a_step_near_its_budget(
     driver: BFCLStatDriver, max_tokens: int, prompt: int, completion: int, truncated: bool
 ) -> None:
-    driver.config.generation.max_tokens = max_tokens
+    driver.config.model.generation.context.max_tokens = max_tokens
     _results(driver, "live_simple", [_entry(prompt=prompt, completion=completion)])
 
     (sample,) = driver.samples()

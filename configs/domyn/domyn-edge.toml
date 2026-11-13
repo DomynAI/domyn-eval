@@ -1,20 +1,19 @@
 # Domyn Edge. With `--swarm`, domyn-swarm serves it from swarms/domyn-edge.yaml; otherwise set `url`
 # to an endpoint serving `path` with the parsers listed there.
 
+[general]
+num_threads = 128
+request_timeout = 7200
+
 [model]
 id = "domyn-edge"
 path = "domyn/Domyn-Edge-SFT"
 swarm_config = "configs/domyn/swarms/domyn-edge.yaml"
 
-[judge]
-swarm_config = "configs/qwen/swarms/qwen3.5-9b.yaml"
-
-[generation]
+[model.generation]
 reasoning = true
-num_threads = 128
-request_timeout = 7200
 
-[generation.think]
+[model.generation.think]
 temperature = 1.0
 top_p = 0.95
 top_k = 20
@@ -23,7 +22,7 @@ presence_penalty = 0.0
 repetition_penalty = 1.0
 chat_template_kwargs = { enable_thinking = true }
 
-[generation.nothink]
+[model.generation.nothink]
 temperature = 0.6
 top_p = 0.95
 top_k = 20
@@ -31,6 +30,10 @@ min_p = 0.0
 presence_penalty = 0.0
 repetition_penalty = 1.0
 chat_template_kwargs = { enable_thinking = false }
+
+[judge]
+swarm_config = "configs/qwen/swarms/qwen3.5-9b.yaml"
+
 
 [bfcl]
 fc_model = true

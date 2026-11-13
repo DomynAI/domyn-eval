@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 class _GenKwargs(BaseModel):
-    """lm_eval's ``gen_kwargs``: the sampling params of ``generation.mode``; None leaves a param to the task."""
+    """lm_eval's ``gen_kwargs``: the sampling params of ``model.generation.mode``; None leaves a param to the task."""
 
     temperature: float | None = None
     top_p: float | None = None
@@ -96,8 +96,8 @@ class LMEvalRunDriver(BaseRunDriver):
 
     @property
     def tokenizer_path(self) -> str:
-        """Tokenizer lm_eval counts tokens with: ``generation.tokenizer_path``, else the served model's."""
-        return (self.config.generation.tokenizer_path or self.config.model.path).rstrip("/")
+        """Tokenizer lm_eval counts tokens with: the model's ``context.tokenizer_path``, else the served model's."""
+        return (self.config.model.generation.context.tokenizer_path or self.config.model.path).rstrip("/")
 
     def __init__(self, config: Config):
         """Give the task its own folder in the run: ``<runs>/<model>/<run_id>/results/lm_eval/<task>``.
@@ -138,18 +138,18 @@ class LMEvalRunDriver(BaseRunDriver):
             raise ValueError(msg)
         if not self.max_model_len:
             msg = (
-                "the context window is unknown: set generation.max_model_len. lm_eval needs it as max_length, and with "
-                "0 its loglikelihood requests lose their first token"
+                "the context window is unknown: set model.generation.context.max_model_len. lm_eval needs it as "
+                "max_length, and with 0 its loglikelihood requests lose their first token"
             )
             raise ValueError(msg)
-        lm_eval, gen = self.config.suite.lm_eval, self.config.generation
+        lm_eval, gen, general = self.config.suite.lm_eval, self.config.model.generation, self.config.general
         chat_completions = lm_eval.chat_completions
 
         gen_kwargs = _GenKwargs.model_validate(
             {
                 **dataclasses.asdict(gen.mode),
                 "chat_template_kwargs": gen.mode.chat_template_kwargs if chat_completions else None,
-                "max_gen_toks": gen.max_tokens or None,
+                "max_gen_toks": gen.context.max_tokens or None,
             }
         )
         metadata = None
@@ -165,11 +165,11 @@ class LMEvalRunDriver(BaseRunDriver):
             model_args=_ModelArgs(
                 model=self.config.model.path,
                 base_url=f"{model_url}/{endpoint}",
-                num_concurrent=lm_eval.num_threads or gen.num_threads,
-                max_retries=gen.max_retries,
+                num_concurrent=lm_eval.num_threads or general.num_threads,
+                max_retries=general.max_retries,
                 max_length=self.max_model_len,
                 tokenizer=self.tokenizer_path,
-                timeout=gen.request_timeout,
+                timeout=general.request_timeout,
             ),
             batch_size=lm_eval.batch_size,
             output_path=self.output_dir,
@@ -178,7 +178,7 @@ class LMEvalRunDriver(BaseRunDriver):
             apply_chat_template=chat_completions,
             log_samples=lm_eval.log_samples,
             allow_unsafe_code=lm_eval.allow_unsafe_code,
-            limit=gen.max_samples if gen.max_samples > 0 else None,
+            limit=general.max_samples if general.max_samples > 0 else None,
             metadata=metadata,
         )
 

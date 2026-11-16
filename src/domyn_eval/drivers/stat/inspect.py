@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 _TRUNCATED = ("max_tokens", "model_length")
 
+_ATTACHMENT = "attachment://"
+
 _INSPECT_VERSION = version("inspect_ai")
 
 
@@ -27,7 +29,8 @@ class InspectStatDriver(BaseStatDriver):
     A log written by the installed inspect is read straight from its zip, many times faster than through inspect,
     which validates every event of every sample. Any other log goes through inspect, which knows its format.
 
-    Only a sample's final generation is seen, so an agent truncated in an earlier turn is not counted.
+    In an agentic eval, answer, reasoning and loops are checked on the evaluated model's last turn only; truncation and
+    completion tokens look at all its turns.
     """
 
     @property
@@ -60,25 +63,59 @@ def _read_zip(path: Path) -> Iterator[dict[str, Any]]:
 
 def _read_inspect(path: Path) -> Iterator[dict[str, Any]]:
     for sample in read_eval_log_samples(str(path), all_samples_required=False):
-        yield {"output": sample.output.model_dump(), "scores": sample.scores}
+        events = [
+            {"event": "model", "role": e.role, "output": e.output.model_dump()}
+            if e.event == "model"
+            else {"event": "score"}
+            for e in sample.events
+            if e.event in ("model", "score")
+        ]
+        yield {
+            "output": sample.output.model_dump(),
+            "scores": sample.scores,
+            "events": events,
+            "attachments": sample.attachments,
+        }
+
+
+def _generations(sample: dict[str, Any]) -> list[dict[str, Any]]:
+    """The evaluated model's generations before scoring; the sample's output when the log records none.
+
+    The sample's output is whichever model spoke last, e.g. the user simulator of an agentic task. The evaluated
+    model is the one without a role: a user simulator or grader has one even when it is the same model (self-play).
+    """
+    generations = []
+    for event in sample.get("events") or []:
+        if event["event"] == "score":
+            break
+        if event["event"] == "model" and event.get("role") is None:
+            generations.append(event["output"])
+    return generations or [sample["output"]]
+
+
+def _attached(text: str, attachments: dict[str, str]) -> str:
+    """``text``, or the attachment it refers to: a log moves its events' long texts to the sample's attachments."""
+    if text.startswith(_ATTACHMENT):
+        return attachments.get(text.removeprefix(_ATTACHMENT), text)
+    return text
 
 
 def _sample(benchmark: str, sample: dict[str, Any]) -> Sample:
-    output = sample["output"]
-    reasoning, truncated = [], False
+    generations = _generations(sample)
+    output = generations[-1]
+    attachments = sample.get("attachments") or {}
+    reasoning = []
     if output["choices"]:  # none when the sample errored
-        choice = output["choices"][0]
-        content = choice["message"]["content"]
+        content = output["choices"][0]["message"]["content"]
         if isinstance(content, list):
-            reasoning = [c["reasoning"] for c in content if c["type"] == "reasoning"]
-        truncated = choice["stop_reason"] in _TRUNCATED
-    usage = output.get("usage")
+            reasoning = [_attached(c["reasoning"], attachments) for c in content if c["type"] == "reasoning"]
+    tokens = [g["usage"]["output_tokens"] for g in generations if g.get("usage")]
     return Sample(
         benchmark=benchmark,
         answer=output["completion"],
         reasoning="\n".join(reasoning) or None,
-        truncated=truncated,
+        truncated=any(g["choices"] and g["choices"][0]["stop_reason"] in _TRUNCATED for g in generations),
         looping=any(find_loop(text) for text in (output["completion"], *reasoning)),
-        completion_tokens=usage["output_tokens"] if usage else None,
+        completion_tokens=max(tokens, default=None),
         scored=bool(sample.get("scores")),
     )

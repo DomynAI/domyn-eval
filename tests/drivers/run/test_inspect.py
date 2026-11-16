@@ -19,6 +19,12 @@ def runs_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
+@pytest.fixture(autouse=True)
+def fresh_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each test is a run of its own: nothing synced or installed yet."""
+    monkeypatch.setattr(InspectRunDriver, "_installed", set())
+
+
 def _task_config(config: Config) -> dict:
     """The task TOML the driver writes for ``config``, parsed."""
     return tomllib.loads(InspectRunDriver(config)._write_inline_task_config().read_text())
@@ -232,6 +238,40 @@ def test_setup_installs_the_task_packages_editable_without_dependencies(
     assert "domyn_inspect.prefetch.prefetch_datasets" in prefetch
 
 
+def test_later_entries_only_add_to_the_environment(
+    config: Config, monkeypatch: pytest.MonkeyPatch, task_package: Path
+) -> None:
+    # An earlier entry's job may already run in the environment: no sync, which would remove its task packages,
+    # and no reinstall of a package it may be loading.
+    calls = _stub_commands(monkeypatch)
+    (task_package.parent / "other-tasks").mkdir()
+    config.suite.inspect.custom_tasks = [{"task": "my_tasks/a"}]
+    config.suite.inspect.task_packages = [task_package.name]
+    InspectRunDriver(copy.deepcopy(config)).setup()
+    calls.clear()
+
+    other_package = task_package.parent / "other-tasks"
+    config.suite.inspect.task_packages = [task_package.name, other_package.name]
+    driver = InspectRunDriver(config)
+    driver.setup()
+
+    assert ["uv", "sync"] not in calls
+    install, prefetch = calls
+    # only the package not installed yet
+    assert install == [
+        "uv",
+        "pip",
+        "install",
+        "--python",
+        str(driver.python),
+        "--no-deps",
+        "--editable",
+        str(other_package),
+    ]
+    assert "domyn_inspect.prefetch.prefetch_datasets" in prefetch
+    assert InspectRunDriver._installed == {str(task_package), str(other_package)}
+
+
 _TASK_PACKAGE_FILES = {
     "pyproject.toml": """\
 [build-system]
@@ -278,9 +318,15 @@ def test_installed_task_package_registers_its_tasks_with_inspect(
     [venv_site] = venv.glob("lib/python*/site-packages")
     (venv_site / "suite.pth").write_text(f"{suite_site}\n")
     driver.python = venv / "bin" / "python"
+    config.suite.inspect.custom_tasks = [{"task": "my_tasks/a"}]
     config.suite.inspect.task_packages = [task_package.name]
 
-    subprocess.run(driver._install_ext_task_packages(), cwd=driver.command_cwd, check=True)
+    # setup's install runs for real; the sync and the prefetch would act on the suite's own environment
+    def run_command(self: InspectRunDriver, args: list[str], *, cwd: Path | None = None, **kwargs: object) -> int:  # noqa: ARG001
+        return subprocess.run(args, cwd=cwd, check=False).returncode if args[:3] == ["uv", "pip", "install"] else 0
+
+    monkeypatch.setattr(InspectRunDriver, "_run_command", run_command)
+    driver.setup()
 
     lookup = (
         "from inspect_ai._util.registry import registry_info, registry_lookup\n"
@@ -291,6 +337,9 @@ def test_installed_task_package_registers_its_tasks_with_inspect(
     assert found.stdout.strip() == "my_tasks/a"
 
 
-def test_build_command_without_task_packages_runs_domyn_inspect_directly(config: Config) -> None:
+@pytest.mark.parametrize("task_packages", [[], ["my-tasks"]])
+def test_build_command_runs_domyn_inspect_directly(config: Config, task_packages: list[str]) -> None:
+    # the job never installs: setup did
     config.suite.inspect.custom_tasks = [{"task": "inspect_evals/gsm8k"}]
+    config.suite.inspect.task_packages = task_packages
     assert InspectRunDriver(config).build_command()[1:3] == ["-m", "domyn_inspect"]

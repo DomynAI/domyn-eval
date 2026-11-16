@@ -3,8 +3,8 @@
 
 import dataclasses
 import logging
-import shlex
 from pathlib import Path
+from typing import ClassVar
 
 import tomli_w
 from pydantic import BaseModel, ConfigDict, Field
@@ -60,6 +60,9 @@ class _TasksConfig(BaseModel):
 class InspectRunDriver(BaseRunDriver):
     """Runs the inline ``custom_tasks`` of ``[inspect]`` with domyn-inspect, one log dir per run id."""
 
+    # Folders of the external task packages (``task_packages``) this run already installed; see ``setup``.
+    _installed: ClassVar[set[str]] = set()
+
     @property
     def suite(self) -> str:
         """Name of the suite; selects its section of the config."""
@@ -86,22 +89,31 @@ class InspectRunDriver(BaseRunDriver):
         return suite_dir(self.path)
 
     def setup(self) -> None:
-        """Install the suite's uv environment and the external task packages, then prefetch the run's tasks.
+        """Install the suite's environment and the entry's ``task_packages``, then prefetch the entry's tasks.
 
-        The prefetch also checks the tasks load offline.
+        All the inspect entries of a run use the same environment so the setup of a later entry must not remove or
+        reinstall the ``task_packages`` (the external packages of custom tasks) that an earlier job uses.
+
+        The prefetch also checks that the tasks load offline.
 
         Raises:
             ValueError: If ``[inspect]`` has no ``custom_tasks``.
             RuntimeError: If an install or the prefetch fails.
         """
-        if self._run_command(["uv", "sync"], log="setup", cwd=self.command_cwd) != 0:
+        # uv sync uninstalls the external packages, which its lock file does not list: none must be installed yet
+        if not self._installed and self._run_command(["uv", "sync"], log="setup", cwd=self.command_cwd) != 0:
             msg = f"uv sync failed in {self.command_cwd}"
             raise RuntimeError(msg)
-        if self.config.suite.inspect.task_packages and self._run_command(
-            self._install_ext_task_packages(), log="setup", cwd=self.command_cwd
-        ):
-            msg = f"installing task_packages {self.config.suite.inspect.task_packages} failed"
-            raise RuntimeError(msg)
+        packages = [str(Path(p).resolve()) for p in self.config.suite.inspect.task_packages]
+        packages = [p for p in dict.fromkeys(packages) if p not in self._installed]
+        if packages:
+            # editable and without dependencies
+            editable = [arg for p in packages for arg in ("--editable", p)]
+            install = ["uv", "pip", "install", "--python", str(self.python), "--no-deps", *editable]
+            if self._run_command(install, log="setup", cwd=self.command_cwd) != 0:
+                msg = f"installing task_packages {packages} failed"
+                raise RuntimeError(msg)
+            self._installed.update(packages)
         self._prefetch_tasks(self._write_inline_task_config())
 
     def build_command(self) -> list[str]:
@@ -110,26 +122,9 @@ class InspectRunDriver(BaseRunDriver):
         The entry's config is its own copy, not the run's ``config.toml``: that holds only the last entry of each
         suite, and a submitted job reads its config when it starts, after the later entries have been written.
 
-        With ``task_packages``, the command first installs them again, offline: the ``uv sync`` of a later entry's
-        setup removes them, and with ``--sbatch`` every entry is set up before the first job starts.
-
         Raises:
             ValueError: If ``[inspect]`` has no ``custom_tasks``.
         """
-        command = self._inspect_command()
-        if not self.config.suite.inspect.task_packages:
-            return command
-        return ["sh", "-c", f"{shlex.join(self._install_ext_task_packages('--offline'))} && exec {shlex.join(command)}"]
-
-    def _install_ext_task_packages(self, *options: str) -> list[str]:
-        """``uv pip install`` of the task packages, editable and without dependencies: they use domyn-inspect's."""
-        packages = [
-            arg for p in self.config.suite.inspect.task_packages for arg in ("--editable", str(Path(p).resolve()))
-        ]
-        return ["uv", "pip", "install", "--python", str(self.python), "--no-deps", *options, *packages]
-
-    def _inspect_command(self) -> list[str]:
-        """``python -m domyn_inspect`` on the entry's config and task config; see ``build_command``."""
         task_config = self._write_inline_task_config()
         args = [
             str(self.python),
@@ -173,6 +168,7 @@ class InspectRunDriver(BaseRunDriver):
 
         Settings left unset are omitted, so domyn-inspect's own defaults apply. The file goes next to the run's logs,
         where an ``--sbatch`` job finds it on the compute node and where it records which tasks the run executed.
+        Sync is done using `self._installed`
 
         Returns:
             The absolute path of the written file.

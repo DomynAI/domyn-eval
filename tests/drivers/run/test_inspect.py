@@ -238,6 +238,27 @@ def test_setup_installs_the_task_packages_editable_without_dependencies(
     assert "domyn_inspect.prefetch.prefetch_datasets" in prefetch
 
 
+def test_setup_rejects_a_missing_task_package_before_installing(
+    config: Config, monkeypatch: pytest.MonkeyPatch, task_package: Path
+) -> None:
+    calls = _stub_commands(monkeypatch)
+
+    monkeypatch.setenv("HOME", str(task_package.parent))
+    config.suite.inspect.custom_tasks = [{"task": "my_tasks/a"}]
+
+    config.suite.inspect.task_packages = [f"~/{task_package.name}"]
+    InspectRunDriver(config).setup()
+    _, install, _ = calls
+    # If not expanded, it would resolved to <tmp_path>/~/my-tasks, which does not exist, so setup would raise.
+    assert install[install.index("--editable") + 1] == str(task_package)
+
+    calls.clear()
+    config.suite.inspect.task_packages = ["no-such-tasks"]
+    with pytest.raises(ValueError, match="no-such-tasks"):
+        InspectRunDriver(config).setup()
+    assert calls == []  # nothing synced or installed
+
+
 def test_later_entries_only_add_to_the_environment(
     config: Config, monkeypatch: pytest.MonkeyPatch, task_package: Path
 ) -> None:

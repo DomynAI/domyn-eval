@@ -97,15 +97,18 @@ class InspectRunDriver(BaseRunDriver):
         The prefetch also checks that the tasks load offline.
 
         Raises:
-            ValueError: If ``[inspect]`` has no ``custom_tasks``.
+            ValueError: If ``[inspect]`` has no ``custom_tasks``, or a task package is not a folder.
             RuntimeError: If an install or the prefetch fails.
         """
+        folders = [Path(p).expanduser().resolve() for p in self.config.suite.inspect.task_packages]
+        if missing := [str(f) for f in folders if not f.is_dir()]:
+            msg = f"task_packages: no such folder {missing}"
+            raise ValueError(msg)
         # uv sync uninstalls the external packages, which its lock file does not list: none must be installed yet
         if not self._installed and self._run_command(["uv", "sync"], log="setup", cwd=self.command_cwd) != 0:
             msg = f"uv sync failed in {self.command_cwd}"
             raise RuntimeError(msg)
-        packages = [str(Path(p).resolve()) for p in self.config.suite.inspect.task_packages]
-        packages = [p for p in dict.fromkeys(packages) if p not in self._installed]
+        packages = [p for p in dict.fromkeys(map(str, folders)) if p not in self._installed]
         if packages:
             # editable and without dependencies
             editable = [arg for p in packages for arg in ("--editable", p)]

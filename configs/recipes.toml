@@ -53,20 +53,20 @@ bfcl = "test_category=all_scoring_no_websearch"
 # Agentic
 
 [tau2]
-description = "Agentic customer service: tau2 airline, retail, telecom. The judge plays the user."
+description = "Agentic customer service: tau2 airline, retail, telecom. [user], else [judge], plays the user."
 [tau2.suites]
 inspect = { task = "tau2", max_tasks = 20, custom_tasks = [
-    { task = "inspect_evals/tau2_airline", message_limit = 200, judge = true },
-    { task = "inspect_evals/tau2_retail", message_limit = 200, judge = true },
-    { task = "inspect_evals/tau2_telecom", message_limit = 200, judge = true },
+    { task = "inspect_evals/tau2_airline", message_limit = 200, roles = ["user"] },
+    { task = "inspect_evals/tau2_retail", message_limit = 200, roles = ["user"] },
+    { task = "inspect_evals/tau2_telecom", message_limit = 200, roles = ["user"] },
 ] }
 
 [tau3]
-description = "tau2, then agentic banking, with knowledge-base search and discoverable tools. The judge plays the user."
+description = "tau2, then agentic banking, with knowledge-base search and discoverable tools. [user], else [judge], plays the user."
 extend = ["tau2"]
 [tau3.suites]
 inspect = { task = "tau3", max_tasks = 20, custom_tasks = [
-    { task = "inspect_evals/tau2_banking", message_limit = 200, judge = true },
+    { task = "inspect_evals/tau2_banking", message_limit = 200, roles = ["user"] },
 ] }
 
 #-------------------------------------------------------------------------------

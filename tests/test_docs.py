@@ -20,9 +20,10 @@ def _fields(cls: type, *, without: tuple[str, ...] = ()) -> set[str]:
 # Each section heading's keys; set at run time, or subsections of their own, are left out.
 SECTIONS = {
     "[general]": _fields(config.GeneralConfig, without=("file",)),
-    "[model]": _fields(config.ModelConfig, without=("endpoint_max_model_len",)),
-    "[generation]": _fields(config.GenerationConfig, without=("think", "nothink", "max_samples")),
-    "[generation.think]": _fields(config.GenerationModeConfig),
+    "[model]": _fields(config.ModelConfig, without=("endpoint_max_model_len", "generation")),
+    "[model.generation]": _fields(config.GenerationConfig, without=("think", "nothink", "user", "grader", "context")),
+    "[model.generation.think]": _fields(config.SamplingConfig),
+    "[model.generation.context]": _fields(config.ContextConfig),
     "[slurm]": _fields(config.SlurmConfig),
     "[inspect]": _fields(config.InspectConfig) | _fields(InspectTask),  # with its custom_tasks table
     "[bfcl]": _fields(config.BFCLConfig),

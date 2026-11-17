@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import dataclasses
+import logging
 import shlex
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,8 @@ from pydantic import BaseModel
 from domyn_eval.config import Config
 from domyn_eval.drivers.run.base import BaseRunDriver
 from domyn_eval.paths import suites_base_dir
+
+logger = logging.getLogger(__name__)
 
 
 class _GenerationConfig(BaseModel):
@@ -78,7 +81,7 @@ class BFCLRunDriver(BaseRunDriver):
             "REMOTE_OPENAI_MODEL": self.config.model.path,
         }
         # bfcl otherwise loads the tokenizer from the registry name, which need not exist
-        if tokenizer := self.config.generation.tokenizer_path or self.config.model.path:
+        if tokenizer := self.config.model.generation.context.tokenizer_path or self.config.model.path:
             env["REMOTE_OPENAI_TOKENIZER_PATH"] = tokenizer
         return env
 
@@ -89,6 +92,11 @@ class BFCLRunDriver(BaseRunDriver):
             config: The run's config; ``config.suite.bfcl`` holds the suite's settings.
         """
         super().__init__(config)
+        if config.general.max_retries:
+            logger.warning(
+                "bfcl: domyn-bfcl does not retry failed requests; general.max_retries=%d is ignored",
+                config.general.max_retries,
+            )
         category_dir = Path(self.output_dir, self.test_category)
         category_dir.mkdir(parents=True, exist_ok=True)
         self.output_dir = str(category_dir)
@@ -110,29 +118,29 @@ class BFCLRunDriver(BaseRunDriver):
         generation_config = ["--generation-config", self._generation_config().model_dump_json()]
 
         generate = [binary, "generate", *common, "--skip-server-setup", *generation_config]
-        generate += ["--num-threads", str(self.config.suite.bfcl.num_threads or self.config.generation.num_threads)]
+        generate += ["--num-threads", str(self.config.suite.bfcl.num_threads or self.config.general.num_threads)]
         if self.config.model.path and Path(self.config.model.path).exists():  # Path("") is the current folder
             # absolute, as the command runs in the suite's folder
             generate += ["--local-model-path", str(Path(self.config.model.path).resolve())]
 
         evaluate = [binary, "evaluate", *common, "--score-dir", self.output_dir, *generation_config]
-        if self.config.generation.max_samples > 0:
+        if self.config.general.max_samples > 0:
             # only the first max_samples of each category were generated
             evaluate.append("--partial-eval")
 
         return ["sh", "-c", f"{shlex.join(generate)} && {shlex.join(evaluate)}"]
 
     def _generation_config(self) -> _GenerationConfig:
-        """The settings domyn-bfcl hands every handler, from ``generation`` and its selected mode."""
-        gen = self.config.generation
+        """The settings domyn-bfcl hands every handler, from the model's ``generation`` and its selected mode."""
+        gen, general = self.config.model.generation, self.config.general
         return _GenerationConfig.model_validate(
             {
                 **dataclasses.asdict(gen.mode),
                 "reasoning": gen.reasoning,
                 "max_model_len": self.max_model_len,
-                "max_tokens": gen.max_tokens or None,
-                "token_safety_margin": gen.token_safety_margin,
-                "request_timeout": gen.request_timeout,
-                "max_samples": gen.max_samples,
+                "max_tokens": gen.context.max_tokens or None,
+                "token_safety_margin": gen.context.token_safety_margin,
+                "request_timeout": general.request_timeout,
+                "max_samples": general.max_samples,
             }
         )

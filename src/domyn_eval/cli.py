@@ -119,7 +119,7 @@ def run(
     if run_id:
         config.general.run_id = run_id
     if max_samples:
-        config.generation.max_samples = max_samples
+        config.general.max_samples = max_samples
     if no_setup:
         config.general.auto_setup = False
     options = RunOptions(

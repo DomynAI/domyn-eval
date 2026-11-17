@@ -121,11 +121,12 @@ def check_context_budget(config: Config, served: int | None) -> Check:
         config: The run config.
         served: The endpoint's context window, if it advertises one.
     """
-    configured = config.generation.max_model_len
+    context = config.model.generation.context
+    configured = context.max_model_len
     if served and configured > served:
         return Check(
             FAIL,
-            f"generation.max_model_len={configured} exceeds the endpoint's "
+            f"model.generation.context.max_model_len={configured} exceeds the endpoint's "
             f"{served}; lower it, or set 0 to read it from the endpoint",
         )
     # Not on vLLM, which advertises max_model_len on every model card; other
@@ -133,15 +134,16 @@ def check_context_budget(config: Config, served: int | None) -> Check:
     if not (served or configured):
         return Check(
             FAIL,
-            "context window unknown: the endpoint does not advertise it; set generation.max_model_len",
+            "context window unknown: the endpoint does not advertise it; set model.generation.context.max_model_len",
         )
     max_model_len = configured or served or 0
     source = "config" if configured else "endpoint"
-    max_tokens = config.generation.max_tokens or max_model_len
+    max_tokens = context.max_tokens or max_model_len
     if max_tokens > max_model_len:
         return Check(
             WARN,
-            f"generation.max_tokens={max_tokens} exceeds max_model_len={max_model_len} ({source}) and will be clamped",
+            f"model.generation.context.max_tokens={max_tokens} exceeds max_model_len={max_model_len} ({source}) "
+            "and will be clamped",
         )
     return Check(
         OK,
@@ -250,12 +252,12 @@ class Preflight:
         downloaded. The selected suites' environments must have transformers.
         """
         estimate = "prompt lengths will be estimated"
-        path = self.config.generation.tokenizer_path or self.config.model.path
+        path = self.config.model.generation.context.tokenizer_path or self.config.model.path
         if not path:
             return [
                 Check(
                     WARN,
-                    f"generation.tokenizer_path and model.path are unset; {estimate}",
+                    f"model.generation.context.tokenizer_path and model.path are unset; {estimate}",
                 )
             ]
         local = Path(path).expanduser()
@@ -273,10 +275,10 @@ class Preflight:
         return checks
 
     def check_endpoints(self) -> list[Check]:
-        """Check the model endpoint and, if it is a different one, the judge's.
+        """Check the model endpoint and, if they are different ones, the judge's and the user model's.
 
         The endpoint must serve ``model.path``, the model name the suites send.
-        An unreachable judge is only a warning: not every suite uses one.
+        An unreachable judge or user model is only a warning: not every suite uses one.
         """
         url = self.config.model.url
         if not url:
@@ -294,14 +296,18 @@ class Preflight:
         else:
             checks.append(check_context_budget(self.config, served_max_model_len(card)))
             checks += self.check_reasoning_parser(model)
-        judge_url = self.config.judge.url
-        if judge_url and judge_url != url:
+        pinged = {url}
+        for section in ("judge", "user"):
+            other = getattr(self.config, section).url
+            if not other or other in pinged:
+                continue
+            pinged.add(other)
             try:
-                list_models(self.client, judge_url)
+                list_models(self.client, other)
             except (httpx.HTTPError, ValueError) as e:
-                checks.append(Check(WARN, f"judge unreachable: {judge_url} ({e!r})"))
+                checks.append(Check(WARN, f"{section} unreachable: {other} ({e!r})"))
             else:
-                checks.append(Check(OK, f"judge reachable: {judge_url}"))
+                checks.append(Check(OK, f"{section} reachable: {other}"))
         return checks
 
     def check_reasoning_parser(self, model_id: str, max_tokens: int = 1024) -> list[Check]:
@@ -315,7 +321,7 @@ class Preflight:
             model_id: The served model to query.
             max_tokens: The completion budget of the probe.
         """
-        generation = self.config.generation
+        generation = self.config.model.generation
         if not generation.reasoning:
             return []
         body: dict[str, Any] = {

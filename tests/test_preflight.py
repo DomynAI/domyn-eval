@@ -5,7 +5,7 @@ import httpx
 import pytest
 
 from domyn_eval import preflight
-from domyn_eval.config import Config, GenerationConfig, ModelConfig
+from domyn_eval.config import Config, ContextConfig, GenerationConfig, ModelConfig
 from domyn_eval.preflight import (
     FAIL,
     OK,
@@ -21,11 +21,9 @@ URL = "http://model:8000/v1"
 JUDGE_URL = "http://judge:8000/v1"
 
 
-def _config(**generation):
-    return Config(
-        model=ModelConfig(id="m", path="m", url=URL),
-        generation=GenerationConfig(**generation),
-    )
+def _config(*, reasoning=True, **context):
+    generation = GenerationConfig(reasoning=reasoning, context=ContextConfig(**context))
+    return Config(model=ModelConfig(id="m", path="m", url=URL, generation=generation))
 
 
 def _levels(checks):
@@ -284,7 +282,7 @@ def test_the_probe_sends_the_modes_chat_template_kwargs():
         return httpx.Response(500)
 
     config = _config(max_model_len=1024)
-    config.generation.think.chat_template_kwargs = {"enable_thinking": True}
+    config.model.generation.think.chat_template_kwargs = {"enable_thinking": True}
     client = httpx.Client(transport=httpx.MockTransport(handler))
     checks = Preflight(config, [], client).check_endpoints()
     assert sent[0]["chat_template_kwargs"] == {"enable_thinking": True}

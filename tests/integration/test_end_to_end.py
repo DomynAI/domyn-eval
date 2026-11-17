@@ -23,11 +23,13 @@ id = "it-model"
 path = "{model}"
 url = "{url}"
 
-[generation]
+[model.generation]
 reasoning = true
+
+[model.generation.context]
 max_tokens = 64
 
-[generation.think]
+[model.generation.think]
 chat_template_kwargs = {{ enable_thinking = true }}
 
 [inspect]

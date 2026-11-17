@@ -225,7 +225,7 @@ def test_url_is_enough_and_skips_the_swarm_lookup(swarms, endpoint):
     probes = swarms([record("edge-1")], {"edge-1": [RUNNING]})
     requested = endpoint(health=200)
     handler = handler_without_swarm_config(url="http://node1:9000/v1")
-    assert handler.model_swarm_config is None
+    assert handler.swarm_configs[SwarmHandler.ModelType.MODEL] is None
     assert requested == []  # liveness is checked by ensure_endpoint, not on construction
     assert probes == []
 
@@ -239,7 +239,7 @@ def test_url_is_not_health_checked_when_a_swarm_config_is_set(swarm_handler, end
 def test_swarm_name_of_a_live_swarm_is_enough(swarms):
     swarms([record("edge-1")], {"edge-1": [RUNNING]})
     handler = handler_without_swarm_config(swarm_name="edge-1")
-    assert handler.model_swarm_config is None
+    assert handler.swarm_configs[SwarmHandler.ModelType.MODEL] is None
     assert handler.try_reuse_swarm(model_type=SwarmHandler.ModelType.MODEL, dry=False)
     assert handler.config.model.id == "edge"
     assert handler.config.model.swarm_name == "edge-1"

@@ -37,12 +37,13 @@ def _recipe_inspect_tasks() -> list[InspectTask]:
     return [InspectTask.model_validate(task) for entry in entries for task in entry["custom_tasks"]]
 
 
-def test_the_recipes_inspect_tasks_are_valid_and_only_tau_needs_the_judge() -> None:
+def test_the_recipes_inspect_tasks_are_valid_and_only_tau_needs_a_user() -> None:
     tasks = _recipe_inspect_tasks()
 
     assert tasks
     for task in tasks:
-        assert task.judge == task.task.startswith("inspect_evals/tau2_"), task.task  # the judge plays tau's user
+        tau = task.task.startswith("inspect_evals/tau2_")
+        assert task.roles == (["user"] if tau else []), task.task
 
 
 @pytest.mark.parametrize("path", MODEL_CONFIGS, ids=lambda p: p.name)

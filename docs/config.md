@@ -104,6 +104,7 @@ The domyn-inspect suite. Recipes usually set `task` and `custom_tasks`.
 | `retry_attempts` | | Retries of a failed task. |
 | `retry_wait` | | Seconds between task retries. |
 | `tiktoken_model` | | The tiktoken encoding inspect counts tokens with. |
+| `task_packages` | `[]` | Packages of extra tasks to install into the suite's environment; see below. |
 
 Each `custom_tasks` entry is a table:
 
@@ -117,6 +118,30 @@ Each `custom_tasks` entry is a table:
 | `pass_k` | | Samples per prompt; reports the mean and pass@1, 2, 4, ... up to k. |
 | `dual_score` | `false` | Report both the upstream scorer's strict accuracy and domyn-inspect's looser answer extraction. |
 | `judge` | `false` | The task needs `[judge]`; `run --swarm` serves one. |
+
+### Tasks of your own
+
+`task_packages` runs tasks kept outside domyn-inspect. Each entry is the folder of a small package of task definitions,
+relative to the working directory. It is installed editable into the suite's environment **without its dependencies**.
+
+A package registers its tasks through an `inspect_ai` entry point named after the package, and inspect prefixes the
+tasks it installs with that name:
+
+```toml
+# my-tasks/pyproject.toml
+[project.entry-points.inspect_ai]
+my_tasks = "my_tasks.registry"    # a module that imports every @task
+```
+
+```python
+@task(name="my_task")    # run as { task = "my_tasks/my_task" }
+def my_task() -> Task: ...
+```
+
+```toml
+# a recipe entry
+inspect = { task = "mine", task_packages = ["../my-tasks"], custom_tasks = [{ task = "my_tasks/my_task" }] }
+```
 
 ## `[bfcl]`
 

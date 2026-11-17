@@ -4,6 +4,7 @@
 import dataclasses
 import logging
 from pathlib import Path
+from typing import ClassVar
 
 import tomli_w
 from pydantic import BaseModel, ConfigDict, Field
@@ -59,6 +60,9 @@ class _TasksConfig(BaseModel):
 class InspectRunDriver(BaseRunDriver):
     """Runs the inline ``custom_tasks`` of ``[inspect]`` with domyn-inspect, one log dir per run id."""
 
+    # Folders of the external task packages (``task_packages``) this run already installed; see ``setup``.
+    _installed: ClassVar[set[str]] = set()
+
     @property
     def suite(self) -> str:
         """Name of the suite; selects its section of the config."""
@@ -85,15 +89,34 @@ class InspectRunDriver(BaseRunDriver):
         return suite_dir(self.path)
 
     def setup(self) -> None:
-        """Install the suite's uv environment, then prefetch the run's tasks and check they load offline.
+        """Install the suite's environment and the entry's ``task_packages``, then prefetch the entry's tasks.
+
+        All the inspect entries of a run use the same environment so the setup of a later entry must not remove or
+        reinstall the ``task_packages`` (the external packages of custom tasks) that an earlier job uses.
+
+        The prefetch also checks that the tasks load offline.
 
         Raises:
-            ValueError: If ``[inspect]`` has no ``custom_tasks``.
-            RuntimeError: If the install or the prefetch fails.
+            ValueError: If ``[inspect]`` has no ``custom_tasks``, or a task package is not a folder.
+            RuntimeError: If an install or the prefetch fails.
         """
-        if self._run_command(["uv", "sync"], log="setup", cwd=self.command_cwd) != 0:
+        folders = [Path(p).expanduser().resolve() for p in self.config.suite.inspect.task_packages]
+        if missing := [str(f) for f in folders if not f.is_dir()]:
+            msg = f"task_packages: no such folder {missing}"
+            raise ValueError(msg)
+        # uv sync uninstalls the external packages, which its lock file does not list: none must be installed yet
+        if not self._installed and self._run_command(["uv", "sync"], log="setup", cwd=self.command_cwd) != 0:
             msg = f"uv sync failed in {self.command_cwd}"
             raise RuntimeError(msg)
+        packages = [p for p in dict.fromkeys(map(str, folders)) if p not in self._installed]
+        if packages:
+            # editable and without dependencies
+            editable = [arg for p in packages for arg in ("--editable", p)]
+            install = ["uv", "pip", "install", "--python", str(self.python), "--no-deps", *editable]
+            if self._run_command(install, log="setup", cwd=self.command_cwd) != 0:
+                msg = f"installing task_packages {packages} failed"
+                raise RuntimeError(msg)
+            self._installed.update(packages)
         self._prefetch_tasks(self._write_inline_task_config())
 
     def build_command(self) -> list[str]:

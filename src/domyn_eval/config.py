@@ -288,11 +288,16 @@ class InspectConfig:
             overrides ``generation.request_timeout``.
         max_tokens: The completion budget of the tasks; overrides
             ``generation.max_tokens``.
+        task_packages: Folders of packages of extra tasks, relative to the
+            working directory, installed editable into the suite's
+            environment without dependencies. Their tasks register through
+            an ``inspect_ai`` entry point.
     """
 
     path: str = "suites/domyn-inspect"
     task: str | None = None
     custom_tasks: list[dict[str, Any]] = dataclasses.field(default_factory=list)
+    task_packages: list[str] = dataclasses.field(default_factory=list)
     max_samples: int | None = None
     num_threads: int | None = None
     max_tasks: int | None = None

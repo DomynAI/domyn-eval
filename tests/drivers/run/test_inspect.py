@@ -64,15 +64,14 @@ def test_custom_tasks_need_a_task_name(config: Config) -> None:
         _ = InspectRunDriver(config).tasks
 
 
-def test_task_config_forwards_fail_on_error_http_timeout_and_max_tokens(config: Config) -> None:
+def test_task_config_forwards_fail_on_error_and_http_timeout(config: Config) -> None:
     inspect = config.suite.inspect
     inspect.fail_on_error = 0.1
     inspect.request_timeout = 2400
-    inspect.max_tokens = 16384
     inspect.custom_tasks = [{"task": "inspect_evals/mgsm"}]
     data = _task_config(config)
     assert data["general"]["fail_on_error"] == 0.1
-    assert data["inspect"] == {"request_timeout": 2400, "max_tokens": 16384}
+    assert data["inspect"] == {"request_timeout": 2400}  # max_tokens comes from the model config's generation
 
 
 def test_task_config_leaves_unset_retry_settings_to_domyn_inspect(config: Config) -> None:

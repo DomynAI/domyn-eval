@@ -194,6 +194,41 @@ def test_no_setup_skips_the_setup(config: Config, calls: Calls) -> None:
     assert _ran(calls) == [("command", "bfcl", "single_turn")]
 
 
+def test_an_entrys_generation_applies_to_that_entry_only(config: Config) -> None:
+    override = {"reasoning": False, "context": {"max_tokens": 32768}}
+    entries = [Entry("bfcl", {"test_category": "simple", "generation": override}), Entry("lm_eval")]
+    assert entries[0].overrides == {"test_category": "simple"}
+    assert entries[0].generation == override
+
+    own, other = (run_module._entry_config(config, entries, e) for e in entries)
+
+    assert own.model.generation.reasoning is False
+    assert own.model.generation.context.max_tokens == 32768
+    assert own.model.generation.context.max_model_len == 32768  # the model's, merged under the override
+    assert other.model is config.model
+    assert config.model.generation.reasoning is True
+    assert config.model.generation.context.max_tokens == 1024
+
+
+def test_an_entrys_generation_is_saved_with_the_endpoints_context_window(
+    config: Config, runs: Path, served: list[dict]
+) -> None:
+    config.model.path = served[0]["id"] = "org/model"
+    config.model.generation.context.max_model_len = 0  # read from the endpoint
+
+    run(config, [Entry("lm_eval", {"generation": {"reasoning": False}})], NO_CHECK)
+
+    saved = tomllib.loads((runs / "config.toml").read_text())["model"]["generation"]
+    assert saved["reasoning"] is False
+    assert saved["context"]["max_model_len"] == 65536
+
+
+def test_an_entrys_label_shows_its_generation() -> None:
+    assert Entry("lm_eval", {"task": "ruler", "generation": {"reasoning": False}}).label == (
+        "lm_eval(task=ruler generation={'reasoning': False})"
+    )
+
+
 @pytest.mark.usefixtures("runs")
 def test_the_context_window_is_read_from_the_endpoint(config: Config, served: list[dict]) -> None:
     config.model.path = served[0]["id"] = "org/model"

@@ -342,8 +342,6 @@ class InspectConfig:
         retry_wait: The seconds between task retries.
         request_timeout: The read timeout of inspect's client, in seconds;
             overrides ``general.request_timeout``.
-        max_tokens: The completion budget of the tasks; overrides
-            ``model.generation.context.max_tokens``.
         task_packages: Folders of packages of extra tasks, relative to the
             working directory, installed editable into the suite's
             environment without dependencies. Their tasks register through
@@ -362,7 +360,6 @@ class InspectConfig:
     retry_attempts: int | None = None
     retry_wait: int | None = None
     request_timeout: int | None = None
-    max_tokens: int | None = None
 
 
 def _check_inspect_entries(entries: list[InspectConfig]) -> None:
@@ -816,6 +813,49 @@ def _resolve_extend(raw: dict[str, Any], key: str) -> dict[str, Any]:
     return entry
 
 
+# The key of a recipe entry that overrides ``[model.generation]`` for that entry, rather than a field of its suite's
+# section.
+_GENERATION_KEY = "generation"
+
+
+def _deep_merge(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
+    """Return ``base`` with ``overrides`` merged in: a table merges key by key, any other value replaces."""
+    merged = dict(base)
+    for key, value in overrides.items():
+        both_tables = isinstance(value, dict) and isinstance(merged.get(key), dict)
+        merged[key] = _deep_merge(merged[key], value) if both_tables else value
+    return merged
+
+
+def merge_generation(generation: GenerationConfig, overrides: dict[str, Any]) -> GenerationConfig:
+    """Return ``generation`` with a recipe entry's ``generation`` table merged in.
+
+    Tables (``think``, ``context``, ...) merge key by key, any other value replaces, e.g.
+    ``{"reasoning": False, "context": {"max_tokens": 32768}}``.
+
+    Args:
+        generation: The model's generation settings.
+        overrides: The entry's ``generation`` table, shaped like ``[model.generation]``.
+
+    Raises:
+        ValueError: If an override names an unknown field or has the wrong type.
+    """
+    return GenerationConfig(**_deep_merge(dataclasses.asdict(generation), overrides))
+
+
+def split_generation(args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Split a recipe entry's arguments into the overrides of its suite's section and its ``generation`` table.
+
+    Raises:
+        ValueError: If ``generation`` is not a table.
+    """
+    generation = args.get(_GENERATION_KEY, {})
+    if not isinstance(generation, dict):
+        msg = f"{_GENERATION_KEY} must be a table shaped like [model.generation], not {generation!r}"
+        raise ValueError(msg)  # noqa: TRY004 - a malformed recipe, reported like the other recipe errors
+    return {key: value for key, value in args.items() if key != _GENERATION_KEY}, generation
+
+
 def _override_value(text: str) -> Any:  # noqa: ANN401 - whatever TOML value the override text parses to
     """Read an override value as TOML, as a dict entry's; other text is a string."""
     try:
@@ -841,11 +881,15 @@ def _override_args(entry: str | dict[str, Any]) -> dict[str, Any]:
 def _check_entries(suite: str, values: list[Any]) -> None:
     """Check that a recipe's entries of ``suite`` can run together.
 
-    Each entry is built as the suite's config section, so a string and a
-    dict, or the same keys in another order, compare equal.
+    Each entry is built as the suite's config section, with its ``generation``
+    table, so a string and a dict, or the same keys in another order, compare
+    equal.
     """
-    entries = [_SUITES[suite](**_override_args(v)) for v in values]
-    if any(entry in entries[:i] for i, entry in enumerate(entries)):
+    args = [split_generation(_override_args(v)) for v in values]
+    entries = [_SUITES[suite](**overrides) for overrides, _ in args]
+    generations = [merge_generation(GenerationConfig(), generation) for _, generation in args]
+    keyed = list(zip(entries, generations, strict=True))
+    if any(key in keyed[:i] for i, key in enumerate(keyed)):
         msg = "would run the same arguments twice"
         raise ValueError(msg)
     if suite in _ENTRY_CHECKS:

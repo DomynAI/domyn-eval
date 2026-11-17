@@ -67,5 +67,11 @@ submitting node.
 
 Any [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness)
 task, set with `[lm_eval] task`, and the tasks of an `[lm_eval] path` folder.
-RULER runs at the context lengths of `max_seq_lengths`. No shipped recipe uses
-lm_eval yet.
+RULER runs at the context lengths of `max_seq_lengths`.
+
+| Benchmark | Task | Recipes |
+| --- | --- | --- |
+| RULER, 4k to 256k tokens, without reasoning | `ruler` | ruler |
+
+Its needle-in-a-haystack tasks download Paul Graham's essays when they build
+their samples, so the `ruler` recipe needs internet access where it runs.

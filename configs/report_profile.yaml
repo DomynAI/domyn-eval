@@ -80,3 +80,7 @@ sections:
           - longbench_v2_scorer/length_short
           - longbench_v2_scorer/length_medium
           - longbench_v2_scorer/length_long
+      - suite: lm_eval
+        benchmark: ruler
+        label: RULER
+        metrics: ["4096", "8192", "16384", "32768", "65536", "131072", "262144"]

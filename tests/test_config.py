@@ -14,6 +14,7 @@ from domyn_eval.config import (
     expand_env,
     load_config,
     load_recipes,
+    merge_generation,
     register_suite,
     registered_suites,
 )
@@ -672,6 +673,42 @@ def test_recipe_rejects_shared_task_names_in_override_strings(tmp_path):
     ids=["strings", "dicts", "string-and-dict", "string-and-dict-bool"],
 )
 def test_recipe_rejects_the_same_arguments_in_any_form(tmp_path, entries):
+    with pytest.raises(ValueError, match="same arguments twice"):
+        _recipes(tmp_path, f"[r]\nsuites.lm_eval = {entries}\n")
+
+
+def test_a_generation_override_merges_tables_key_by_key(config):
+    generation = config.model.generation
+    overrides = {"reasoning": False, "think": {"temperature": 1.0}, "context": {"max_tokens": 0}}
+    merged = merge_generation(generation, overrides)
+    assert merged.reasoning is False
+    assert merged.think == dataclasses.replace(generation.think, temperature=1.0)
+    assert merged.context == dataclasses.replace(generation.context, max_tokens=0)
+    assert generation.reasoning is True  # the model's own is left as it was
+
+
+def test_recipe_entries_keep_their_generation_table(tmp_path):
+    recipes = _recipes(tmp_path, '[r]\nsuites.lm_eval = { task = "ruler", generation = { reasoning = false } }\n')
+    assert recipes["r"].entries() == [("lm_eval", {"task": "ruler", "generation": {"reasoning": False}})]
+
+
+@pytest.mark.parametrize(
+    "generation",
+    ["{ reasonig = false }", "{ context = { max_tokns = 1 } }", "{ reasoning = [1] }", '"nothink"'],
+    ids=["unknown-key", "unknown-nested-key", "wrong-type", "not-a-table"],
+)
+def test_recipe_rejects_an_invalid_generation_table(tmp_path, generation):
+    with pytest.raises(ValueError, match="recipe 'r': suite 'lm_eval'"):
+        _recipes(tmp_path, f'[r]\nsuites.lm_eval = {{ task = "a", generation = {generation} }}\n')
+
+
+def test_entries_differing_only_in_generation_are_distinct(tmp_path):
+    entries = '[{ task = "a" }, { task = "a", generation = { reasoning = false } }]'
+    assert len(_recipes(tmp_path, f"[r]\nsuites.lm_eval = {entries}\n")["r"].entries()) == 2
+
+
+def test_recipe_rejects_the_same_generation_twice(tmp_path):
+    entries = '[{ task = "a", generation = { reasoning = false } }, "task=a generation={reasoning=false}"]'
     with pytest.raises(ValueError, match="same arguments twice"):
         _recipes(tmp_path, f"[r]\nsuites.lm_eval = {entries}\n")
 

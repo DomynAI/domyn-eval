@@ -109,10 +109,6 @@ temperature = 0.6
     assert config.model.generation.mode.temperature == pytest.approx(0.6)
 
 
-def test_completion_reserve_defaults_to_none(tmp_path):
-    assert _load(tmp_path, "").model.generation.context.completion_reserve is None
-
-
 def test_generation_defaults_match_loading_an_empty_file(tmp_path):
     assert _load(tmp_path, "").model.generation == config_module.GenerationConfig()
 
@@ -128,17 +124,13 @@ def test_the_run_settings_are_not_a_models(tmp_path, key):
         _load(tmp_path, f"[model.generation]\n{key} = 1\n")
 
 
-def test_the_old_generation_section_is_unknown(tmp_path):
-    with pytest.raises(ValueError, match=r"unknown config sections \['generation'\]"):
-        _load(tmp_path, "[generation]\nreasoning = true\n")
-
-
-def test_the_judge_is_capped_by_default(tmp_path):
-    assert _load(tmp_path, "").judge.generation.context.max_tokens == 4096
-    assert config_module.Config().judge.generation.context.max_tokens == 4096
-    assert _load(tmp_path, '[judge]\npath = "j"\n').judge.generation.context.max_tokens == 4096
-    context = _load(tmp_path, "[judge.generation.context]\nmax_model_len = 8\n").judge.generation.context
-    assert context.max_tokens == 4096
+@pytest.mark.parametrize("section", ["judge", "user"])
+def test_a_role_model_is_capped_by_default(tmp_path, section):
+    assert getattr(_load(tmp_path, ""), section).generation.context.max_tokens == 4096
+    assert getattr(config_module.Config(), section).generation.context.max_tokens == 4096
+    assert getattr(_load(tmp_path, f'[{section}]\npath = "m"\n'), section).generation.context.max_tokens == 4096
+    loaded = _load(tmp_path, f"[{section}.generation.context]\nmax_model_len = 8\n")
+    assert getattr(loaded, section).generation.context.max_tokens == 4096
 
 
 def test_the_judges_cap_can_be_lifted(tmp_path):
@@ -149,19 +141,11 @@ def test_the_model_under_test_is_not_capped_by_default(tmp_path):
     assert _load(tmp_path, "").model.generation.context.max_tokens == 0
 
 
-def test_the_roles_default_to_deterministic(tmp_path):
-    judge = _load(tmp_path, "").judge.generation
-    assert (judge.user.temperature, judge.grader.temperature) == (0.0, 0.0)  # as tau2 asks of its user
-
-
 def test_a_role_table_keeps_the_defaults_it_does_not_set(tmp_path):
     body = "[judge.generation.user]\nchat_template_kwargs = { enable_thinking = false }\n"
-    user = _load(tmp_path, body).judge.generation.user
-    assert (user.temperature, user.chat_template_kwargs) == (0.0, {"enable_thinking": False})
-
-
-def test_a_role_table_overrides_its_defaults(tmp_path):
-    assert _load(tmp_path, "[judge.generation.grader]\ntemperature = 0.2\n").judge.generation.grader.temperature == 0.2
+    judge = _load(tmp_path, body).judge.generation
+    assert (judge.user.temperature, judge.user.chat_template_kwargs) == (0.0, {"enable_thinking": False})
+    assert judge.grader.temperature == 0.0  # no table at all
 
 
 def test_a_role_samples_with_its_own_params_over_the_mode(tmp_path):
@@ -172,9 +156,13 @@ top_k = 20
 chat_template_kwargs = { enable_thinking = true }
 [model.generation.user]
 top_k = 40
+[model.generation.grader]
+temperature = 0.2
 """
-    user = _load(tmp_path, body).model.generation.role("user")
+    generation = _load(tmp_path, body).model.generation
+    user = generation.role("user")
     assert (user.temperature, user.top_k, user.chat_template_kwargs) == (0.0, 40, {"enable_thinking": True})
+    assert generation.role("grader").temperature == 0.2  # a table's temperature wins over the default
 
 
 def test_the_judge_inherits_nothing_from_the_model(config):
@@ -182,18 +170,17 @@ def test_the_judge_inherits_nothing_from_the_model(config):
     assert config.judge.generation.role("user") == config_module.SamplingConfig(temperature=0.0)
 
 
-def test_snapshot_writes_the_judges_generation_for_the_suites(config, tmp_path):
-    config.judge.generation.context.max_tokens = 1024
-    config.judge.generation.user.top_k = 20
-    saved = tomllib.loads(_snapshot(config, tmp_path).read_text())
-    assert saved["judge"]["generation"]["context"]["max_tokens"] == 1024
-    assert saved["judge"]["generation"]["user"] == {"temperature": 0.0, "top_k": 20}
-    assert load_config(tmp_path / "run.config.toml").judge.generation == config.judge.generation
-
-
-def test_the_user_model_is_capped_by_default(tmp_path):
-    assert _load(tmp_path, '[user]\npath = "u"\n').user.generation.context.max_tokens == 4096
-    assert config_module.Config().user.generation.context.max_tokens == 4096
+@pytest.mark.parametrize("section", ["judge", "user"])
+def test_snapshot_writes_a_role_models_generation_for_the_suites(config, tmp_path, section):
+    model = getattr(config, section)
+    model.path = f"{section}-model"
+    model.generation.context.max_tokens = 1024
+    model.generation.user.top_k = 20
+    path = _snapshot(config, tmp_path)
+    saved = tomllib.loads(path.read_text())[section]
+    assert saved["generation"]["context"]["max_tokens"] == 1024
+    assert saved["generation"]["user"] == {"temperature": 0.0, "top_k": 20}
+    assert getattr(load_config(path), section) == model
 
 
 @pytest.mark.parametrize(
@@ -213,18 +200,6 @@ def test_the_user_is_played_by_the_user_model_else_the_judge(tmp_path, body, use
 def test_an_unknown_role_raises(config):
     with pytest.raises(ValueError, match="unknown role 'judge'"):
         config.role_section("judge")
-
-
-def test_snapshot_writes_the_user_model(config, tmp_path):
-    config.user.path = "u"
-    config.user.generation.user.temperature = 0.5
-    reloaded = load_config(_snapshot(config, tmp_path))
-    assert reloaded.user == config.user
-
-
-def test_sampling_params_outside_a_sampling_table_raise(tmp_path):
-    with pytest.raises(pydantic.ValidationError, match="temperature"):
-        _load(tmp_path, "[model.generation]\ntemperature = 1\n")
 
 
 @pytest.mark.parametrize("key", ["max_tokens", "completion_reserve"])

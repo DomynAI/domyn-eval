@@ -14,7 +14,7 @@ from typing import Any, TypeVar, cast
 from urllib.parse import urlparse
 
 import tomli_w
-from pydantic import ConfigDict, ValidationInfo, field_validator
+from pydantic import ConfigDict, field_validator
 from pydantic.dataclasses import dataclass
 
 from domyn_eval.paths import UNRESOLVED_REF
@@ -89,9 +89,12 @@ class GeneralConfig:
         recipes_file: The recipes TOML.
         max_samples: The samples per task; -1 runs them all.
         num_threads: The concurrent requests of every suite that does not
-            set its own ``num_threads``.
+            set its own ``num_threads``. The default, 1, sends one request
+            at a time, the same in every suite (theirs differ: lm-eval 1,
+            inspect 10, BFCL 100); raise it to what the endpoint can serve.
         request_timeout: The per-request client timeout, in seconds.
-        max_retries: The retries of a failed request.
+        max_retries: The retries of a failed request, for every model of
+            the run, the user and grader models included.
     """
 
     run_id: str | None = None
@@ -100,7 +103,7 @@ class GeneralConfig:
     file: str | None = None
     recipes_file: str = "configs/recipes.toml"
     max_samples: int = -1
-    num_threads: int = 64
+    num_threads: int = 1
     request_timeout: int = 3600
     max_retries: int = 0
 
@@ -160,13 +163,11 @@ class ContextConfig:
     tokenizer_path: str | None = None
 
 
-# Each role's defaults, filled in under what its table sets: deterministic, as tau2 asks of its user simulator.
-_ROLE_DEFAULTS: dict[str, dict[str, Any]] = {"user": {"temperature": 0.0}, "grader": {"temperature": 0.0}}
+@dataclass(config=_STRICT)
+class RoleSamplingConfig(SamplingConfig):
+    """The sampling params of a role (``user``, ``grader``): deterministic unless its table sets a temperature."""
 
-
-def _sampling(**params: Any) -> Any:  # noqa: ANN401 - a dataclass field
-    """Return a SamplingConfig field whose default sets ``params``."""
-    return dataclasses.field(default_factory=lambda: SamplingConfig(**params))
+    temperature: float | None = 0.0
 
 
 @dataclass(config=_STRICT)
@@ -181,23 +182,17 @@ class GenerationConfig:
             ``think`` over ``nothink`` as ``mode``.
         think: The params used with reasoning.
         nothink: The params used without reasoning.
-        user: The params of the user it simulates in agentic tasks (tau2),
-            over ``mode``.
-        grader: The params of the grader, over ``mode``.
+        user: The params of the ``user`` role, over ``mode``.
+        grader: The params of the ``grader`` role, over ``mode``.
         context: The context window and its budget.
     """
 
     reasoning: bool = True
-    think: SamplingConfig = _sampling()
-    nothink: SamplingConfig = _sampling()
-    user: SamplingConfig = _sampling(**_ROLE_DEFAULTS["user"])
-    grader: SamplingConfig = _sampling(**_ROLE_DEFAULTS["grader"])
+    think: SamplingConfig = dataclasses.field(default_factory=SamplingConfig)
+    nothink: SamplingConfig = dataclasses.field(default_factory=SamplingConfig)
+    user: RoleSamplingConfig = dataclasses.field(default_factory=RoleSamplingConfig)
+    grader: RoleSamplingConfig = dataclasses.field(default_factory=RoleSamplingConfig)
     context: ContextConfig = dataclasses.field(default_factory=ContextConfig)
-
-    @field_validator("user", "grader", mode="before")
-    @classmethod
-    def _role_defaults(cls, role: Any, info: ValidationInfo) -> Any:  # noqa: ANN401 - a raw table, or a SamplingConfig
-        return {**_ROLE_DEFAULTS.get(info.field_name or "", {}), **role} if isinstance(role, dict) else role
 
     @property
     def mode(self) -> SamplingConfig:
@@ -267,25 +262,18 @@ class ModelConfig:
         return parsed.hostname
 
 
-# The defaults of [judge] and [user] that differ from a model's, filled in under what they set: a looping judge would
-# otherwise write up to its whole context window into the conversation.
-_ROLE_MODEL_DEFAULTS: dict[str, Any] = {"generation": {"context": {"max_tokens": 4096}}}
-
-# The model roles tasks can need: tau2's simulated user, and the grader of model-graded scorers.
+# The inspect model roles tasks can need: what a task gets from get_model(role=...).
 ROLES = ("user", "grader")
 
 
-def _with_defaults(raw: dict[str, Any], defaults: dict[str, Any]) -> dict[str, Any]:
-    """Return ``raw`` with ``defaults`` filled in where it sets nothing, table by table."""
-    merged = {**defaults, **raw}
-    for key, default in defaults.items():
-        if isinstance(default, dict) and isinstance(raw.get(key), dict):
-            merged[key] = _with_defaults(raw[key], default)
-    return merged
+def _capped(section: dict[str, Any]) -> dict[str, Any]:
+    """Return ``[judge]`` or ``[user]`` with ``max_tokens`` 4096 unless it sets one.
 
-
-def _default_role_model() -> ModelConfig:
-    return ModelConfig(**_with_defaults({}, _ROLE_MODEL_DEFAULTS))
+    A looping judge would otherwise write up to its whole context window into the conversation.
+    """
+    generation = section.get("generation", {})
+    context = {"max_tokens": 4096, **generation.get("context", {})}
+    return {**section, "generation": {**generation, "context": context}}
 
 
 def _sbatch(option: str) -> Any:  # noqa: ANN401 - a dataclass field
@@ -627,16 +615,16 @@ class Config:
 
     general: GeneralConfig = dataclasses.field(default_factory=GeneralConfig)
     model: ModelConfig = dataclasses.field(default_factory=ModelConfig)
-    judge: ModelConfig = dataclasses.field(default_factory=_default_role_model)
-    user: ModelConfig = dataclasses.field(default_factory=_default_role_model)
+    judge: ModelConfig = dataclasses.field(default_factory=lambda: ModelConfig(**_capped({})))
+    user: ModelConfig = dataclasses.field(default_factory=lambda: ModelConfig(**_capped({})))
     slurm: SlurmConfig = dataclasses.field(default_factory=SlurmConfig)
     suite: SuiteConfig = dataclasses.field(default_factory=SuiteConfig)
 
     @field_validator("judge", "user", mode="before")
     @classmethod
-    def _role_model_defaults(cls, section: Any) -> Any:  # noqa: ANN401 - a raw table, or a ModelConfig left as is
-        """Fill in what ``[judge]`` and ``[user]`` leave unset with their defaults, e.g. a 4096-token cap."""
-        return _with_defaults(section, _ROLE_MODEL_DEFAULTS) if isinstance(section, dict) else section
+    def _cap_role_models(cls, section: Any) -> Any:  # noqa: ANN401 - a raw table, or a ModelConfig left as is
+        """Cap ``[judge]`` and ``[user]`` at 4096 tokens unless they set their own ``max_tokens``."""
+        return _capped(section) if isinstance(section, dict) else section
 
     def role_section(self, role: str) -> str | None:
         """Return the section of the model playing ``role``: ``user`` if set, else ``judge``, for the user.

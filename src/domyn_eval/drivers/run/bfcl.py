@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import dataclasses
+import logging
 import shlex
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,8 @@ from pydantic import BaseModel
 from domyn_eval.config import Config
 from domyn_eval.drivers.run.base import BaseRunDriver
 from domyn_eval.paths import suites_base_dir
+
+logger = logging.getLogger(__name__)
 
 
 class _GenerationConfig(BaseModel):
@@ -89,6 +92,11 @@ class BFCLRunDriver(BaseRunDriver):
             config: The run's config; ``config.suite.bfcl`` holds the suite's settings.
         """
         super().__init__(config)
+        if config.general.max_retries:
+            logger.warning(
+                "bfcl: domyn-bfcl does not retry failed requests; general.max_retries=%d is ignored",
+                config.general.max_retries,
+            )
         category_dir = Path(self.output_dir, self.test_category)
         category_dir.mkdir(parents=True, exist_ok=True)
         self.output_dir = str(category_dir)

@@ -191,3 +191,13 @@ def test_build_command_runs_no_setup(config: Config, monkeypatch: pytest.MonkeyP
     config.general.auto_setup = True  # acting on it is the caller's job
     BFCLRunDriver(config).build_command()
     assert calls == []
+
+
+@pytest.mark.parametrize(("max_retries", "warned"), [(0, False), (2, True)])
+def test_max_retries_is_ignored_with_a_warning(
+    config: Config, caplog: pytest.LogCaptureFixture, max_retries: int, warned: bool
+) -> None:
+    config.general.max_retries = max_retries
+    with caplog.at_level("WARNING", logger="domyn_eval.drivers.run.bfcl"):
+        BFCLRunDriver(config)
+    assert ("general.max_retries=2 is ignored" in caplog.text) is warned

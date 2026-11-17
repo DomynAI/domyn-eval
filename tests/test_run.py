@@ -1,4 +1,5 @@
 import tomllib
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -212,11 +213,19 @@ def test_a_failed_preflight_runs_nothing(config: Config, calls: Calls, preflight
 
 
 @pytest.mark.usefixtures("runs", "preflight")
-def test_an_entry_needing_a_judge_fails_the_preflight_without_one(
-    config: Config, calls: Calls, drivers: dict[str, dict]
+@pytest.mark.parametrize(
+    "leave_unserved",
+    [
+        lambda config: setattr(config.judge, "url", None),
+        lambda config: setattr(config.user, "path", "user-model"),  # set, so it plays the user, but not served
+    ],
+    ids=["judge without url", "user model without url"],
+)
+def test_an_entry_whose_role_model_has_no_endpoint_fails_the_preflight(
+    config: Config, calls: Calls, drivers: dict[str, dict], leave_unserved: Callable[[Config], None]
 ) -> None:
     drivers["inspect"] = {"roles": ["user"]}
-    config.judge.url = None
+    leave_unserved(config)
 
     assert run(config, [Entry("inspect")], RunOptions()) == 1
 
@@ -254,42 +263,27 @@ def test_a_swarm_comes_down_when_the_preflight_fails(config: Config, calls: Call
 
 
 @pytest.mark.usefixtures("runs", "swarm")
-def test_the_judge_is_served_only_for_entries_that_need_one(
-    config: Config, calls: Calls, drivers: dict[str, dict]
-) -> None:
-    run(config, [Entry("bfcl")], RunOptions(swarm=True, check=False))
-    assert ("ensure", "judge", False) not in calls
-
-    drivers["inspect"] = {"roles": ["grader"]}
-    run(config, [Entry("inspect")], RunOptions(swarm=True, check=False))
-    assert ("ensure", "judge", False) in calls
-
-
-@pytest.mark.usefixtures("runs", "swarm")
 @pytest.mark.parametrize(
-    ("roles", "served"),
-    [(["user"], ["user"]), (["grader"], ["judge"]), (["user", "grader"], ["judge", "user"])],
+    ("user_model", "roles", "served"),
+    [
+        (False, [], []),  # no role needed: only the model is served
+        (False, ["grader"], ["judge"]),
+        (False, ["user"], ["judge"]),  # without a user model, the judge plays the user
+        (True, ["user"], ["user"]),
+        (True, ["grader"], ["judge"]),
+        (True, ["user", "grader"], ["judge", "user"]),
+    ],
 )
-def test_a_user_model_is_served_for_the_user_and_the_judge_for_the_grader(
-    config: Config, calls: Calls, drivers: dict[str, dict], roles: list[str], served: list[str]
+def test_each_needed_role_is_served_by_the_model_playing_it(
+    config: Config, calls: Calls, drivers: dict[str, dict], user_model: bool, roles: list[str], served: list[str]
 ) -> None:
-    config.user.swarm_config = "user.yaml"
+    if user_model:
+        config.user.swarm_config = "user.yaml"
     drivers["inspect"] = {"roles": roles}
 
     run(config, [Entry("inspect")], RunOptions(swarm=True, check=False))
 
     assert [c[1] for c in calls if c[0] == "ensure"] == ["model", *served]
-
-
-@pytest.mark.usefixtures("runs", "swarm")
-def test_without_a_user_model_the_judge_is_served_for_the_user(
-    config: Config, calls: Calls, drivers: dict[str, dict]
-) -> None:
-    drivers["inspect"] = {"roles": ["user"]}
-
-    run(config, [Entry("inspect")], RunOptions(swarm=True, check=False))
-
-    assert [c[1] for c in calls if c[0] == "ensure"] == ["model", "judge"]
 
 
 @pytest.mark.parametrize(
@@ -314,18 +308,6 @@ def test_a_role_model_about_to_be_deployed_only_warns(config: Config) -> None:
     checks = run_module._check_roles(config, {"user": ["inspect"], "grader": ["inspect"]}, deploying=True)
 
     assert [c.level for c in checks] == [WARN, FAIL]  # the judge has nothing to deploy
-
-
-@pytest.mark.usefixtures("runs", "preflight")
-def test_a_user_model_without_an_endpoint_fails_the_preflight(
-    config: Config, calls: Calls, drivers: dict[str, dict]
-) -> None:
-    config.user.path = "user-model"  # set, so it plays the user, but not served
-    drivers["inspect"] = {"roles": ["user"]}
-
-    assert run(config, [Entry("inspect")], RunOptions()) == 1
-
-    assert _ran(calls) == []
 
 
 def _sbatch_calls(sbatch: Path) -> list[list[str]]:

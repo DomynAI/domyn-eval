@@ -21,19 +21,18 @@ with the sections of the suites it ran.
 | `recipes_file` | `"configs/recipes.toml"` | The recipes `--recipe` picks from. |
 | `run_id` | the current time | Names the run's folder; set at run time with `run --run-id`. |
 | `max_samples` | `-1` | Samples per task, `-1` for all; set at run time with `run --max-samples`. |
-| `num_threads` | `64` | Concurrent requests of each suite that sets no `num_threads` of its own. |
+| `num_threads` | `1` | Concurrent requests of each suite that sets no `num_threads` of its own. The default sends one request at a time, the same in every suite (theirs differ: lm-eval 1, inspect 10, BFCL 100); raise it to what the endpoint can serve. |
 | `request_timeout` | `3600` | Seconds a request may take. |
-| `max_retries` | `0` | Retries of a failed request. |
+| `max_retries` | `0` | Retries of a failed request, for every model of the run, the user and grader models included.
 
 ## `[model]`, `[judge]` and `[user]`
 
-`[model]` is the model under evaluation. The others play the roles some tasks
-need, named by their `roles`:
+`[model]` is the model under evaluation. The others play the inspect model
+roles some tasks need, named by their `roles`: a task that calls
+`get_model(role="user")` or `get_model(role="grader")` gets the model playing it.
 
-- `user`, the user simulated in agentic tasks (tau2), is played by `[user]`,
-  else by `[judge]`, else by the model under test;
-- `grader`, the grader of model-graded scorers, is played by `[judge]`, else
-  by the model under test.
+- `user` is played by `[user]`, else by `[judge]`, else by the model under test;
+- `grader` is played by `[judge]`, else by the model under test.
 
 A run whose tasks need a role fails its checks if no section plays it, or if
 that section's `url` is unset and `run --swarm` does not serve one.
@@ -77,8 +76,7 @@ endpoint's defaults.
 
 The sampling parameters of each role, as played by this model, e.g.
 `[user.generation.user]`. They take the keys of the modes and apply over the
-selected mode. Both default to `temperature = 0`, as tau2 asks of its user;
-a table keeps it unless it sets its own.
+selected mode. Both default to `temperature = 0`; a table keeps it unless it sets its own.
 
 ### `[model.generation.context]` and `[judge.generation.context]`
 

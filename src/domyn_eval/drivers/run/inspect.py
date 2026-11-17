@@ -171,7 +171,6 @@ class InspectRunDriver(BaseRunDriver):
 
         Settings left unset are omitted, so domyn-inspect's own defaults apply. The file goes next to the run's logs,
         where an ``--sbatch`` job finds it on the compute node and where it records which tasks the run executed.
-        Sync is done using `self._installed`
 
         Returns:
             The absolute path of the written file.

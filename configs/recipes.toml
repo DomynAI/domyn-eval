@@ -2,7 +2,8 @@
 #
 # A recipe lists, per suite, entries that override the suite's config section: a "key=value" string, a table, or a
 # list of either. `extend = [...]` adds other recipes' entries before the recipe's own; each inspect entry runs as its
-# own task group, named by its `task`.
+# own task group, named by its `task`. An entry's `generation` table overrides the model's [model.generation] for that
+# entry only, e.g. `generation = { reasoning = false }` or `generation = { context = { max_tokens = 32768 } }`.
 
 #-------------------------------------------------------------------------------
 # Academic core
@@ -86,7 +87,7 @@ inspect = { task = "code", max_tasks = 2, num_threads = 512, custom_tasks = [
 [swe]
 description = "Agentic software engineering: SWE-bench Verified, graded in Singularity."
 [swe.suites]
-inspect = { task = "swe", max_tasks = 1, num_threads = 100, custom_tasks = [
+inspect = { task = "swe", max_tasks = 1, num_threads = 100, generation = { context = { max_tokens = 32768 } }, custom_tasks = [
     { task = "inspect_evals/swe_bench_singularity", task_args = { message_limit = 300 }, display_name = "SWE-bench Verified (Singularity)" },
 ] }
 
@@ -100,6 +101,14 @@ inspect = { task = "long_context", max_tasks = 1, num_threads = 100, custom_task
     { task = "inspect_evals/longbench_v2" },
 ] }
 
+[ruler]
+description = "RULER, lm-eval's default task group, at 4k to 256k tokens, without reasoning."
+[ruler.suites]
+# chat_completions, so the chat template, and with it enable_thinking = false, is applied
+lm_eval = { task = "ruler", chat_completions = true, max_seq_lengths = [
+    4096, 8192, 16384, 32768, 65536, 131072, 262144,
+], generation = { reasoning = false } }
+
 #-------------------------------------------------------------------------------
 # Domyn Edge
 
@@ -111,5 +120,5 @@ extend = ["math", "knowledge", "if", "fc_offline", "tau3", "code", "swe"]
 # All
 
 [all]
-description = "All the supported suites: math, knowledge, if, fc_offline, tau3, code, swe, long_context."
-extend = ["math", "knowledge", "if", "fc_offline", "tau3", "code", "swe", "long_context"]
+description = "All the supported suites: math, knowledge, if, fc_offline, tau3, code, swe, long_context, ruler."
+extend = ["math", "knowledge", "if", "fc_offline", "tau3", "code", "swe", "long_context", "ruler"]

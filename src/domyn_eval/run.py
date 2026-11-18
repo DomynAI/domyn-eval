@@ -9,15 +9,15 @@ import logging
 import shlex
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import httpx
 from rich.console import Console
 from rich.table import Table
 
-from domyn_eval.config import Config
+from domyn_eval.config import Config, Entry
 from domyn_eval.drivers import run_driver
 from domyn_eval.drivers.run.base import BaseRunDriver
 from domyn_eval.log import display_path
@@ -39,25 +39,6 @@ if TYPE_CHECKING:
     from domyn_eval.swarm import SwarmHandler
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class Entry:
-    """One invocation of a suite: the suite, and the overrides of its section.
-
-    Attributes:
-        suite: A registered suite.
-        overrides: Fields of the suite's section to replace, as a recipe entry sets them.
-    """
-
-    suite: str
-    overrides: dict[str, Any] = field(default_factory=dict)
-
-    @property
-    def label(self) -> str:
-        """The suite, with its overrides."""
-        args = " ".join(f"{key}={value}" for key, value in self.overrides.items())
-        return f"{self.suite}({args})" if args else self.suite
 
 
 @dataclass(frozen=True)
@@ -125,6 +106,9 @@ def run(config: Config, entries: list[Entry], options: RunOptions, console: Cons
     try:
         if handler:
             handler.ensure_endpoint(handler.ModelType.MODEL, options.dry)
+        # Before the drivers: an entry overriding the model's generation gets its own copy of [model]
+        if not options.dry and config.model.url:
+            _read_context_window(config)
         drivers = [run_driver(e.suite)(_entry_config(config, entries, e)) for e in entries]
         needed = _needed_roles(entries, drivers)
         if handler:
@@ -138,8 +122,6 @@ def run(config: Config, entries: list[Entry], options: RunOptions, console: Cons
             if failed(checks):
                 logger.error("preflight: failed; fix the above, or pass --no-check")
                 return 1
-        if not options.dry and config.model.url:
-            _read_context_window(config)
         if options.sbatch:
             outcomes, submitted = _submit(config, entries, drivers, handler, options)
         else:
@@ -174,9 +156,13 @@ def _entry_config(config: Config, entries: list[Entry], entry: Entry) -> Config:
     """The config of an entry: the run's, with each suite's section overridden by its entry.
 
     Endpoints and their generation settings are shared with the run's config, the suite sections are copied. The other
-    suites take the overrides of their last entry, so the run's ``config.toml`` holds every suite of the run.
+    suites take the overrides of their last entry, so the run's ``config.toml`` holds every suite of the run. An entry
+    with a ``generation`` table gets its own copy of ``[model]``, with the table merged over its generation.
     """
-    entry_config = dataclasses.replace(config, suite=copy.deepcopy(config.suite))
+    model = config.model
+    if entry.generation:
+        model = dataclasses.replace(model, generation=model.generation.with_overrides(entry.generation))
+    entry_config = dataclasses.replace(config, model=model, suite=copy.deepcopy(config.suite))
     last = {e.suite: e for e in entries} | {entry.suite: entry}
     for e in last.values():
         entry_config.suite.override(e.suite, e.overrides)

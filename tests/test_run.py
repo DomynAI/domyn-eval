@@ -8,10 +8,10 @@ from click.testing import CliRunner
 
 from domyn_eval import run as run_module
 from domyn_eval.cli import cli
-from domyn_eval.config import Config
+from domyn_eval.config import Config, Entry
 from domyn_eval.drivers.run.base import BaseRunDriver
 from domyn_eval.preflight import FAIL, OK, WARN, Check
-from domyn_eval.run import Entry, RunOptions, run
+from domyn_eval.run import RunOptions, run
 from domyn_eval.swarm import SwarmHandler
 
 
@@ -192,6 +192,39 @@ def test_no_setup_skips_the_setup(config: Config, calls: Calls) -> None:
     run(config, [Entry("bfcl")], NO_CHECK)
 
     assert _ran(calls) == [("command", "bfcl", "single_turn")]
+
+
+def test_an_entrys_generation_applies_to_that_entry_only(config: Config) -> None:
+    override = {"reasoning": False, "context": {"max_tokens": 32768}}
+    entries = [Entry("bfcl", {"test_category": "simple"}, override), Entry("lm_eval")]
+
+    own, other = (run_module._entry_config(config, entries, e) for e in entries)
+
+    assert own.model.generation.reasoning is False
+    assert own.model.generation.context.max_tokens == 32768
+    assert own.model.generation.context.max_model_len == 32768  # the model's, merged under the override
+    assert other.model is config.model
+    assert config.model.generation.reasoning is True
+    assert config.model.generation.context.max_tokens == 1024
+
+
+def test_an_entrys_generation_is_saved_with_the_endpoints_context_window(
+    config: Config, runs: Path, served: list[dict]
+) -> None:
+    config.model.path = served[0]["id"] = "org/model"
+    config.model.generation.context.max_model_len = 0  # read from the endpoint
+
+    run(config, [Entry("lm_eval", generation={"reasoning": False})], NO_CHECK)
+
+    saved = tomllib.loads((runs / "config.toml").read_text())["model"]["generation"]
+    assert saved["reasoning"] is False
+    assert saved["context"]["max_model_len"] == 65536
+
+
+def test_an_entrys_label_shows_its_generation() -> None:
+    assert Entry("lm_eval", {"task": "ruler"}, {"reasoning": False}).label == (
+        "lm_eval(task=ruler generation={'reasoning': False})"
+    )
 
 
 @pytest.mark.usefixtures("runs")

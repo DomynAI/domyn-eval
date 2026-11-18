@@ -10,7 +10,8 @@ backend:
     nginx_timeout: "8h"
     wall_time: "12:00:00"
 args: >-
-  --max-model-len 131072
+  --max-model-len 524288
+  --hf-overrides.max_position_embeddings: 524288
   --dtype bfloat16
   --trust-remote-code
   --tensor-parallel-size 1

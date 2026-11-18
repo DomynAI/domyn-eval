@@ -47,7 +47,6 @@ class _TasksInspect(BaseModel):
     """The tasks TOML's ``[inspect]``: domyn-inspect's ``TasksInspectConfig``; None leaves a field to its default."""
 
     request_timeout: int | None = None
-    max_tokens: int | None = None
 
 
 class _TasksConfig(BaseModel):

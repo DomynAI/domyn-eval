@@ -33,8 +33,8 @@ def test_the_recipes_load() -> None:
 
 
 def _recipe_inspect_tasks() -> list[InspectTask]:
-    entries = [o for r in load_recipes(CONFIGS / "recipes.toml").values() for s, o in r.entries() if s == "inspect"]
-    return [InspectTask.model_validate(task) for entry in entries for task in entry["custom_tasks"]]
+    entries = [e for r in load_recipes(CONFIGS / "recipes.toml").values() for e in r.entries() if e.suite == "inspect"]
+    return [InspectTask.model_validate(task) for entry in entries for task in entry.overrides["custom_tasks"]]
 
 
 def test_the_recipes_inspect_tasks_are_valid_and_only_tau_needs_a_user() -> None:

@@ -23,7 +23,7 @@ with the sections of the suites it ran.
 | `max_samples` | `-1` | Samples per task, `-1` for all; set at run time with `run --max-samples`. |
 | `num_threads` | `1` | Concurrent requests of each suite that sets no `num_threads` of its own. The default sends one request at a time, the same in every suite (theirs differ: lm-eval 1, inspect 10, BFCL 100); raise it to what the endpoint can serve. |
 | `request_timeout` | `3600` | Seconds a request may take. |
-| `max_retries` | `0` | Retries of a failed request, for every model of the run, the user and grader models included.
+| `max_retries` | `0` | Retries of a failed request, for every model of the run, the user and grader models included. |
 
 ## `[model]`, `[judge]` and `[user]`
 
@@ -120,7 +120,6 @@ The domyn-inspect suite. Recipes usually set `task` and `custom_tasks`.
 | `task` | | Names the task group; each recipe entry needs its own. |
 | `custom_tasks` | `[]` | The tasks to run; see below. |
 | `max_samples` | | Samples per task; overrides `general.max_samples`. |
-| `max_tokens` | | The tasks' completion budget; overrides `model.generation.context.max_tokens`. |
 | `num_threads` | | Concurrent requests (inspect's `max_connections`); overrides `general.num_threads`. |
 | `max_tasks` | | Tasks run in parallel. |
 | `request_timeout` | | Seconds a request may take; overrides `general.request_timeout`. |
@@ -215,6 +214,19 @@ extend = ["math", "knowledge", "if", "fc_offline", "tau3", "code", "swe"]    # t
 A suite's entry overrides the keys of its section, as a `"key=value ..."`
 string, a table, or a list of either to run the suite several times. `--suite`
 adds suites with the config's own settings.
+
+An entry's `generation` table overrides `[model.generation]` for that entry
+only, in any suite. It takes the keys of `[model.generation]`; tables such as
+`think`, `context` and `chat_template_kwargs` merge key by key with the
+model's:
+
+```toml
+[swe.suites]
+inspect = { task = "swe", generation = { context = { max_tokens = 32768 } }, custom_tasks = [...] }
+
+[ruler.suites]
+lm_eval = { task = "ruler", max_seq_lengths = [131072, 262144], generation = { reasoning = false } }
+```
 
 ## Environment
 

@@ -10,7 +10,7 @@ import tomllib
 from collections.abc import Callable
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
-from typing import Any, TypeVar, cast
+from typing import Any, Self, TypeVar, cast
 from urllib.parse import urlparse
 
 import tomli_w
@@ -204,6 +204,28 @@ class GenerationConfig:
         own = {key: value for key, value in dataclasses.asdict(getattr(self, name)).items() if value is not None}
         return dataclasses.replace(self.mode, **own)
 
+    def with_overrides(self, overrides: dict[str, Any]) -> Self:
+        """Return a copy of this config (e.g. ``[model.generation]``) with a recipe entry's ``generation`` applied.
+
+        A table changes only the keys it sets, at any depth; any other value replaces the config's own. For example:
+
+            config:  reasoning = true,  think = {temperature = 0.6, top_p = 0.95}
+            table:   reasoning = false, think = {temperature = 1.0}
+            result:  reasoning = false, think = {temperature = 1.0, top_p = 0.95}
+
+        Raises:
+            ValueError: If an override names an unknown field or has the wrong type.
+        """
+
+        def merge(base: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
+            merged = dict(base)
+            for key, value in new.items():
+                both_tables = isinstance(value, dict) and isinstance(merged.get(key), dict)
+                merged[key] = merge(merged[key], value) if both_tables else value
+            return merged
+
+        return type(self)(**merge(dataclasses.asdict(self), overrides))
+
 
 @dataclass(config=_STRICT)
 class ModelConfig:
@@ -342,8 +364,6 @@ class InspectConfig:
         retry_wait: The seconds between task retries.
         request_timeout: The read timeout of inspect's client, in seconds;
             overrides ``general.request_timeout``.
-        max_tokens: The completion budget of the tasks; overrides
-            ``model.generation.context.max_tokens``.
         task_packages: Folders of packages of extra tasks, relative to the
             working directory, installed editable into the suite's
             environment without dependencies. Their tasks register through
@@ -362,7 +382,6 @@ class InspectConfig:
     retry_attempts: int | None = None
     retry_wait: int | None = None
     request_timeout: int | None = None
-    max_tokens: int | None = None
 
 
 def _check_inspect_entries(entries: list[InspectConfig]) -> None:
@@ -751,6 +770,43 @@ register_suite(
 SuiteOverride = str | dict[str, Any] | list[str | dict[str, Any]]
 
 
+@dataclasses.dataclass
+class Entry:
+    """One invocation of a suite: the suite, the overrides of its section and of the model's generation.
+
+    Attributes:
+        suite: A registered suite.
+        overrides: Fields of the suite's section to replace.
+        generation: Shaped like ``[model.generation]``, merged over it for this entry only.
+    """
+
+    suite: str
+    overrides: dict[str, Any] = dataclasses.field(default_factory=dict)
+    generation: dict[str, Any] = dataclasses.field(default_factory=dict)
+
+    @classmethod
+    def parse(cls, suite: str, raw: str | dict[str, Any]) -> Self:
+        """Read a recipe entry of ``suite``: ``key=value`` tokens or a table, its ``generation`` table split out.
+
+        Raises:
+            ValueError: If a token is not ``key=value``, or ``generation`` is not a table.
+        """
+        overrides = dict(_override_args(raw))
+        generation = overrides.pop("generation", {})
+        if not isinstance(generation, dict):
+            msg = f"generation must be a table shaped like [model.generation], not {generation!r}"
+            raise ValueError(msg)  # noqa: TRY004 - a malformed recipe, reported like the other recipe errors
+        return cls(suite, overrides, generation)
+
+    @property
+    def label(self) -> str:
+        """The suite, with its overrides."""
+        args = " ".join(f"{key}={value}" for key, value in self.overrides.items())
+        if self.generation:
+            args = f"{args} generation={self.generation}".strip()
+        return f"{self.suite}({args})" if args else self.suite
+
+
 @dataclass(config=_STRICT)
 class RecipeConfig:
     """A named bundle of suite invocations.
@@ -765,10 +821,10 @@ class RecipeConfig:
     suites: dict[str, SuiteOverride] = dataclasses.field(default_factory=dict)
     description: str = ""
 
-    def entries(self) -> list[tuple[str, dict[str, Any]]]:
-        """Return the suite invocations in order, as ``(suite, overrides of its section)``."""
+    def entries(self) -> list[Entry]:
+        """Return the suite invocations in order."""
         return [
-            (suite, _override_args(entry))
+            Entry.parse(suite, entry)
             for suite, value in self.suites.items()
             for entry in (value if isinstance(value, list) else [value])
         ]
@@ -841,15 +897,17 @@ def _override_args(entry: str | dict[str, Any]) -> dict[str, Any]:
 def _check_entries(suite: str, values: list[Any]) -> None:
     """Check that a recipe's entries of ``suite`` can run together.
 
-    Each entry is built as the suite's config section, so a string and a
-    dict, or the same keys in another order, compare equal.
+    Two entries run the same when their suite section and their generation are equal. Both are built over the
+    defaults, so a string and a table, or the same keys in another order, compare equal.
     """
-    entries = [_SUITES[suite](**_override_args(v)) for v in values]
-    if any(entry in entries[:i] for i, entry in enumerate(entries)):
+    entries = [Entry.parse(suite, v) for v in values]
+    sections = [_SUITES[suite](**e.overrides) for e in entries]
+    runs = [(s, GenerationConfig().with_overrides(e.generation)) for s, e in zip(sections, entries, strict=True)]
+    if any(run in runs[:i] for i, run in enumerate(runs)):
         msg = "would run the same arguments twice"
         raise ValueError(msg)
     if suite in _ENTRY_CHECKS:
-        _ENTRY_CHECKS[suite](entries)
+        _ENTRY_CHECKS[suite](sections)
 
 
 def _validate_resolved(key: str, suites: dict[str, Any]) -> None:

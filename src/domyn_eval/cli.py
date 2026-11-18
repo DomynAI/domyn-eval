@@ -9,13 +9,13 @@ from typing import TypeVar
 import click
 import yaml
 
-from domyn_eval.config import Config, load_config, load_recipes, registered_suites
+from domyn_eval.config import Config, Entry, load_config, load_recipes, registered_suites
 from domyn_eval.drivers.report.base import DuplicateBenchmarkError
 from domyn_eval.drivers.stat.base import StatsProfile
 from domyn_eval.log import set_level, setup_logging
 from domyn_eval.preflight import Preflight, failed, render_checks
 from domyn_eval.report import Leaderboard, ModelReport, ReportProfile, render_duplicates
-from domyn_eval.run import Entry, RunOptions
+from domyn_eval.run import RunOptions
 from domyn_eval.run import run as run_entries
 from domyn_eval.stats import ModelStats
 
@@ -54,7 +54,7 @@ def _selected_entries(config: Config, suites: tuple[str, ...], recipe: str | Non
         if recipe not in recipes:
             msg = f"unknown recipe {recipe!r}; known are {sorted(recipes)}"
             raise click.ClickException(msg)
-        recipe_entries = [Entry(suite, overrides) for suite, overrides in recipes[recipe].entries()]
+        recipe_entries = recipes[recipe].entries()
     in_recipe = {e.suite for e in recipe_entries}
     return [Entry(s) for s in dict.fromkeys(suites) if s not in in_recipe] + recipe_entries
 

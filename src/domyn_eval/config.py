@@ -205,10 +205,13 @@ class GenerationConfig:
         return dataclasses.replace(self.mode, **own)
 
     def with_overrides(self, overrides: dict[str, Any]) -> Self:
-        """Return these settings with a recipe entry's ``generation`` table merged in.
+        """Return a copy of this config (e.g. ``[model.generation]``) with a recipe entry's ``generation`` applied.
 
-        Its tables (``think``, ``context``, ``chat_template_kwargs`` inside ``think``, ...) merge key by key into
-        this one's, any other value replaces, e.g. ``{"reasoning": False, "context": {"max_tokens": 32768}}``.
+        A table changes only the keys it sets, at any depth; any other value replaces the config's own. For example:
+
+            config:  reasoning = true,  think = {temperature = 0.6, top_p = 0.95}
+            table:   reasoning = false, think = {temperature = 1.0}
+            result:  reasoning = false, think = {temperature = 1.0, top_p = 0.95}
 
         Raises:
             ValueError: If an override names an unknown field or has the wrong type.
@@ -894,16 +897,13 @@ def _override_args(entry: str | dict[str, Any]) -> dict[str, Any]:
 def _check_entries(suite: str, values: list[Any]) -> None:
     """Check that a recipe's entries of ``suite`` can run together.
 
-    Each entry is built as the suite's config section, with its ``generation``
-    table, so a string and a dict, or the same keys in another order, compare
-    equal.
+    Two entries run the same when their suite section and their generation are equal. Both are built over the
+    defaults, so a string and a table, or the same keys in another order, compare equal.
     """
-    parsed = [Entry.parse(suite, v) for v in values]
-    sections = [_SUITES[suite](**e.overrides) for e in parsed]
-    keyed = [
-        (section, GenerationConfig().with_overrides(e.generation)) for section, e in zip(sections, parsed, strict=True)
-    ]
-    if any(key in keyed[:i] for i, key in enumerate(keyed)):
+    entries = [Entry.parse(suite, v) for v in values]
+    sections = [_SUITES[suite](**e.overrides) for e in entries]
+    runs = [(s, GenerationConfig().with_overrides(e.generation)) for s, e in zip(sections, entries, strict=True)]
+    if any(run in runs[:i] for i, run in enumerate(runs)):
         msg = "would run the same arguments twice"
         raise ValueError(msg)
     if suite in _ENTRY_CHECKS:

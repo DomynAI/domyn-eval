@@ -9,15 +9,15 @@ import logging
 import shlex
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import httpx
 from rich.console import Console
 from rich.table import Table
 
-from domyn_eval.config import Config, merge_generation, split_generation
+from domyn_eval.config import Config, Entry
 from domyn_eval.drivers import run_driver
 from domyn_eval.drivers.run.base import BaseRunDriver
 from domyn_eval.log import display_path
@@ -39,35 +39,6 @@ if TYPE_CHECKING:
     from domyn_eval.swarm import SwarmHandler
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class Entry:
-    """One invocation of a suite: the suite, the overrides of its section and of the model's generation.
-
-    Attributes:
-        suite: A registered suite.
-        overrides: Fields of the suite's section to replace, as a recipe entry sets them. A ``generation`` key is
-            moved to ``generation``.
-        generation: The entry's ``generation`` table, merged over ``[model.generation]`` for this entry only.
-    """
-
-    suite: str
-    overrides: dict[str, Any] = field(default_factory=dict)
-    generation: dict[str, Any] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        """Move a ``generation`` key of ``overrides`` to ``generation``."""
-        self.overrides, generation = split_generation(self.overrides)
-        self.generation = generation or self.generation
-
-    @property
-    def label(self) -> str:
-        """The suite, with its overrides."""
-        args = " ".join(f"{key}={value}" for key, value in self.overrides.items())
-        if self.generation:
-            args = f"{args} generation={self.generation}".strip()
-        return f"{self.suite}({args})" if args else self.suite
 
 
 @dataclass(frozen=True)
@@ -190,7 +161,7 @@ def _entry_config(config: Config, entries: list[Entry], entry: Entry) -> Config:
     """
     model = config.model
     if entry.generation:
-        model = dataclasses.replace(model, generation=merge_generation(model.generation, entry.generation))
+        model = dataclasses.replace(model, generation=model.generation.with_overrides(entry.generation))
     entry_config = dataclasses.replace(config, model=model, suite=copy.deepcopy(config.suite))
     last = {e.suite: e for e in entries} | {entry.suite: entry}
     for e in last.values():

@@ -217,14 +217,15 @@ adds suites with the config's own settings.
 
 An entry's `generation` table overrides `[model.generation]` for that entry
 only, in any suite. It takes the keys of `[model.generation]`; tables such as
-`think` and `context` merge key by key with the model's:
+`think`, `context` and `chat_template_kwargs` merge key by key with the
+model's:
 
 ```toml
 [swe.suites]
 inspect = { task = "swe", generation = { context = { max_tokens = 32768 } }, custom_tasks = [...] }
 
 [ruler.suites]
-lm_eval = { task = "ruler", max_seq_lengths = [131072, 524288], generation = { reasoning = false } }
+lm_eval = { task = "ruler", max_seq_lengths = [131072, 262144], generation = { reasoning = false } }
 ```
 
 ## Environment

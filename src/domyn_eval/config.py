@@ -10,7 +10,7 @@ import tomllib
 from collections.abc import Callable
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
-from typing import Any, TypeVar, cast
+from typing import Any, Self, TypeVar, cast
 from urllib.parse import urlparse
 
 import tomli_w
@@ -203,6 +203,25 @@ class GenerationConfig:
         """Return the params of role ``name`` (``user`` or ``grader``): its own, over the selected mode's."""
         own = {key: value for key, value in dataclasses.asdict(getattr(self, name)).items() if value is not None}
         return dataclasses.replace(self.mode, **own)
+
+    def with_overrides(self, overrides: dict[str, Any]) -> Self:
+        """Return these settings with a recipe entry's ``generation`` table merged in.
+
+        Its tables (``think``, ``context``, ``chat_template_kwargs`` inside ``think``, ...) merge key by key into
+        this one's, any other value replaces, e.g. ``{"reasoning": False, "context": {"max_tokens": 32768}}``.
+
+        Raises:
+            ValueError: If an override names an unknown field or has the wrong type.
+        """
+
+        def merge(base: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
+            merged = dict(base)
+            for key, value in new.items():
+                both_tables = isinstance(value, dict) and isinstance(merged.get(key), dict)
+                merged[key] = merge(merged[key], value) if both_tables else value
+            return merged
+
+        return type(self)(**merge(dataclasses.asdict(self), overrides))
 
 
 @dataclass(config=_STRICT)
@@ -748,6 +767,43 @@ register_suite(
 SuiteOverride = str | dict[str, Any] | list[str | dict[str, Any]]
 
 
+@dataclasses.dataclass
+class Entry:
+    """One invocation of a suite: the suite, the overrides of its section and of the model's generation.
+
+    Attributes:
+        suite: A registered suite.
+        overrides: Fields of the suite's section to replace.
+        generation: Shaped like ``[model.generation]``, merged over it for this entry only.
+    """
+
+    suite: str
+    overrides: dict[str, Any] = dataclasses.field(default_factory=dict)
+    generation: dict[str, Any] = dataclasses.field(default_factory=dict)
+
+    @classmethod
+    def parse(cls, suite: str, raw: str | dict[str, Any]) -> Self:
+        """Read a recipe entry of ``suite``: ``key=value`` tokens or a table, its ``generation`` table split out.
+
+        Raises:
+            ValueError: If a token is not ``key=value``, or ``generation`` is not a table.
+        """
+        overrides = dict(_override_args(raw))
+        generation = overrides.pop("generation", {})
+        if not isinstance(generation, dict):
+            msg = f"generation must be a table shaped like [model.generation], not {generation!r}"
+            raise ValueError(msg)  # noqa: TRY004 - a malformed recipe, reported like the other recipe errors
+        return cls(suite, overrides, generation)
+
+    @property
+    def label(self) -> str:
+        """The suite, with its overrides."""
+        args = " ".join(f"{key}={value}" for key, value in self.overrides.items())
+        if self.generation:
+            args = f"{args} generation={self.generation}".strip()
+        return f"{self.suite}({args})" if args else self.suite
+
+
 @dataclass(config=_STRICT)
 class RecipeConfig:
     """A named bundle of suite invocations.
@@ -762,10 +818,10 @@ class RecipeConfig:
     suites: dict[str, SuiteOverride] = dataclasses.field(default_factory=dict)
     description: str = ""
 
-    def entries(self) -> list[tuple[str, dict[str, Any]]]:
-        """Return the suite invocations in order, as ``(suite, overrides of its section)``."""
+    def entries(self) -> list[Entry]:
+        """Return the suite invocations in order."""
         return [
-            (suite, _override_args(entry))
+            Entry.parse(suite, entry)
             for suite, value in self.suites.items()
             for entry in (value if isinstance(value, list) else [value])
         ]
@@ -813,49 +869,6 @@ def _resolve_extend(raw: dict[str, Any], key: str) -> dict[str, Any]:
     return entry
 
 
-# The key of a recipe entry that overrides ``[model.generation]`` for that entry, rather than a field of its suite's
-# section.
-_GENERATION_KEY = "generation"
-
-
-def _deep_merge(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
-    """Return ``base`` with ``overrides`` merged in: a table merges key by key, any other value replaces."""
-    merged = dict(base)
-    for key, value in overrides.items():
-        both_tables = isinstance(value, dict) and isinstance(merged.get(key), dict)
-        merged[key] = _deep_merge(merged[key], value) if both_tables else value
-    return merged
-
-
-def merge_generation(generation: GenerationConfig, overrides: dict[str, Any]) -> GenerationConfig:
-    """Return ``generation`` with a recipe entry's ``generation`` table merged in.
-
-    Tables (``think``, ``context``, ...) merge key by key, any other value replaces, e.g.
-    ``{"reasoning": False, "context": {"max_tokens": 32768}}``.
-
-    Args:
-        generation: The model's generation settings.
-        overrides: The entry's ``generation`` table, shaped like ``[model.generation]``.
-
-    Raises:
-        ValueError: If an override names an unknown field or has the wrong type.
-    """
-    return GenerationConfig(**_deep_merge(dataclasses.asdict(generation), overrides))
-
-
-def split_generation(args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Split a recipe entry's arguments into the overrides of its suite's section and its ``generation`` table.
-
-    Raises:
-        ValueError: If ``generation`` is not a table.
-    """
-    generation = args.get(_GENERATION_KEY, {})
-    if not isinstance(generation, dict):
-        msg = f"{_GENERATION_KEY} must be a table shaped like [model.generation], not {generation!r}"
-        raise ValueError(msg)  # noqa: TRY004 - a malformed recipe, reported like the other recipe errors
-    return {key: value for key, value in args.items() if key != _GENERATION_KEY}, generation
-
-
 def _override_value(text: str) -> Any:  # noqa: ANN401 - whatever TOML value the override text parses to
     """Read an override value as TOML, as a dict entry's; other text is a string."""
     try:
@@ -885,15 +898,16 @@ def _check_entries(suite: str, values: list[Any]) -> None:
     table, so a string and a dict, or the same keys in another order, compare
     equal.
     """
-    args = [split_generation(_override_args(v)) for v in values]
-    entries = [_SUITES[suite](**overrides) for overrides, _ in args]
-    generations = [merge_generation(GenerationConfig(), generation) for _, generation in args]
-    keyed = list(zip(entries, generations, strict=True))
+    parsed = [Entry.parse(suite, v) for v in values]
+    sections = [_SUITES[suite](**e.overrides) for e in parsed]
+    keyed = [
+        (section, GenerationConfig().with_overrides(e.generation)) for section, e in zip(sections, parsed, strict=True)
+    ]
     if any(key in keyed[:i] for i, key in enumerate(keyed)):
         msg = "would run the same arguments twice"
         raise ValueError(msg)
     if suite in _ENTRY_CHECKS:
-        _ENTRY_CHECKS[suite](entries)
+        _ENTRY_CHECKS[suite](sections)
 
 
 def _validate_resolved(key: str, suites: dict[str, Any]) -> None:

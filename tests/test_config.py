@@ -8,13 +8,13 @@ from pydantic.dataclasses import dataclass
 
 from domyn_eval import config as config_module
 from domyn_eval.config import (
+    Entry,
     RecipeConfig,
     SuiteDrivers,
     expand_config,
     expand_env,
     load_config,
     load_recipes,
-    merge_generation,
     register_suite,
     registered_suites,
 )
@@ -470,9 +470,9 @@ lm_eval = ""
 """,
     )
     assert recipes["mix"].entries() == [
-        ("bfcl", {"test_category": "simple"}),
-        ("bfcl", {"test_category": "live"}),
-        ("lm_eval", {}),
+        Entry("bfcl", {"test_category": "simple"}),
+        Entry("bfcl", {"test_category": "live"}),
+        Entry("lm_eval"),
     ]
 
 
@@ -680,22 +680,37 @@ def test_recipe_rejects_the_same_arguments_in_any_form(tmp_path, entries):
 def test_a_generation_override_merges_tables_key_by_key(config):
     generation = config.model.generation
     overrides = {"reasoning": False, "think": {"temperature": 1.0}, "context": {"max_tokens": 0}}
-    merged = merge_generation(generation, overrides)
+    merged = generation.with_overrides(overrides)
     assert merged.reasoning is False
     assert merged.think == dataclasses.replace(generation.think, temperature=1.0)
     assert merged.context == dataclasses.replace(generation.context, max_tokens=0)
     assert generation.reasoning is True  # the model's own is left as it was
 
 
+def test_a_generation_override_merges_chat_template_kwargs(config):
+    generation = dataclasses.replace(
+        config.model.generation,
+        think=dataclasses.replace(config.model.generation.think, chat_template_kwargs={"a": 1, "b": 2}),
+    )
+    merged = generation.with_overrides({"think": {"chat_template_kwargs": {"a": 3}}})
+    assert merged.think.chat_template_kwargs == {"a": 3, "b": 2}
+
+
 def test_recipe_entries_keep_their_generation_table(tmp_path):
     recipes = _recipes(tmp_path, '[r]\nsuites.lm_eval = { task = "ruler", generation = { reasoning = false } }\n')
-    assert recipes["r"].entries() == [("lm_eval", {"task": "ruler", "generation": {"reasoning": False}})]
+    assert recipes["r"].entries() == [Entry("lm_eval", {"task": "ruler"}, {"reasoning": False})]
 
 
 @pytest.mark.parametrize(
     "generation",
-    ["{ reasonig = false }", "{ context = { max_tokns = 1 } }", "{ reasoning = [1] }", '"nothink"'],
-    ids=["unknown-key", "unknown-nested-key", "wrong-type", "not-a-table"],
+    [
+        "{ reasonig = false }",
+        "{ context = { max_tokns = 1 } }",
+        "{ reasoning = [1] }",
+        "{ reasoning = { a = 1 } }",
+        '"nothink"',
+    ],
+    ids=["unknown-key", "unknown-nested-key", "wrong-type", "table-for-a-value", "not-a-table"],
 )
 def test_recipe_rejects_an_invalid_generation_table(tmp_path, generation):
     with pytest.raises(ValueError, match="recipe 'r': suite 'lm_eval'"):

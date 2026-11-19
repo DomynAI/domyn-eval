@@ -102,11 +102,11 @@ inspect = { task = "long_context", max_tasks = 1, num_threads = 100, custom_task
 ] }
 
 [ruler]
-description = "RULER, lm-eval's default task group, at 4k to 256k tokens, without reasoning."
+description = "RULER, lm-eval's default task group, at 4k to 128k tokens, without reasoning."
 [ruler.suites]
 # chat_completions, so the chat template, and with it enable_thinking = false, is applied
 lm_eval = { task = "ruler", chat_completions = true, max_seq_lengths = [
-    4096, 8192, 16384, 32768, 65536, 131072, 262144,
+    4096, 8192, 16384, 32768, 65536, 131072,
 ], generation = { reasoning = false } }
 
 #-------------------------------------------------------------------------------

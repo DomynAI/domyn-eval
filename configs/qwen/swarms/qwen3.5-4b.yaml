@@ -13,7 +13,7 @@ args: >-
   --max-model-len 262144
   --dtype bfloat16
   --tensor-parallel-size 1
-  --gpu-memory-utilization 0.9
+  --gpu-memory-utilization 0.95
   --language-model-only
   --reasoning-parser qwen3
   --enable-auto-tool-choice

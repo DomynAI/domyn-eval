@@ -225,7 +225,7 @@ model's:
 inspect = { task = "swe", generation = { context = { max_tokens = 32768 } }, custom_tasks = [...] }
 
 [ruler.suites]
-lm_eval = { task = "ruler", max_seq_lengths = [131072, 262144], generation = { reasoning = false } }
+lm_eval = { task = "ruler", max_seq_lengths = [65536, 131072], generation = { reasoning = false } }
 ```
 
 ## Environment

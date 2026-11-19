@@ -71,7 +71,7 @@ RULER runs at the context lengths of `max_seq_lengths`.
 
 | Benchmark | Task | Recipes |
 | --- | --- | --- |
-| RULER, 4k to 256k tokens, without reasoning | `ruler` | ruler |
+| RULER, 4k to 128k tokens, without reasoning | `ruler` | ruler |
 
 Its needle-in-a-haystack tasks download Paul Graham's essays when they build
 their samples, so the `ruler` recipe needs internet access where it runs.

@@ -34,6 +34,12 @@ chat_template_kwargs = { enable_thinking = false }
 [judge]
 swarm_config = "configs/qwen/swarms/qwen3.5-9b.yaml"
 
+[judge.generation.grader]
+chat_template_kwargs = { enable_thinking = false }
+
+[judge.generation.user]
+chat_template_kwargs = { enable_thinking = false }
+
 
 [bfcl]
 fc_model = true

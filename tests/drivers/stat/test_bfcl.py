@@ -77,7 +77,8 @@ def test_only_scored_leaderboard_categories_count(driver: BFCLStatDriver) -> Non
     [
         (1024, 100, 1003, False),
         (1024, 100, 1004, True),
-        (0, 32000, 503, True),  # the window leaves 512 tokens past the safety margin
+        (0, 32000, 753, True),  # the 32768-token window leaves 768 tokens
+        (0, 32000, 752, False),
         (0, 100, 30000, False),
     ],
 )

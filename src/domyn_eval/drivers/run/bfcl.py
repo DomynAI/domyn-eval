@@ -35,7 +35,6 @@ class _GenerationConfig(BaseModel):
     reasoning: bool
     max_model_len: int
     max_tokens: int | None
-    token_safety_margin: int
     request_timeout: int
     max_samples: int
 
@@ -139,7 +138,6 @@ class BFCLRunDriver(BaseRunDriver):
                 "reasoning": gen.reasoning,
                 "max_model_len": self.max_model_len,
                 "max_tokens": gen.context.max_tokens or None,
-                "token_safety_margin": gen.context.token_safety_margin,
                 "request_timeout": general.request_timeout,
                 "max_samples": general.max_samples,
             }

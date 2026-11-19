@@ -78,7 +78,7 @@ def test_reasoning_selects_think_params(config):
     generation = config.model.generation
     assert generation.mode is generation.think
     assert generation.mode.temperature == pytest.approx(0.6)
-    assert generation.context.completion_reserve == 16384
+    assert generation.context.max_tokens == 1024
 
 
 def test_reasoning_selects_nothink_params(tmp_path):
@@ -203,7 +203,7 @@ def test_an_unknown_role_raises(config):
         config.role_section("judge")
 
 
-@pytest.mark.parametrize("key", ["max_tokens", "completion_reserve"])
+@pytest.mark.parametrize("key", ["max_tokens", "max_model_len"])
 def test_a_sampling_table_takes_only_sampling_params(tmp_path, key):
     with pytest.raises(pydantic.ValidationError, match=key):
         _load(tmp_path, f"[judge.generation.grader]\n{key} = 1\n")

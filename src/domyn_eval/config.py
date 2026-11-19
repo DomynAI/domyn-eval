@@ -147,19 +147,12 @@ class ContextConfig:
         max_tokens: The cap on each generation; 0 uses what the context
             window leaves.
         max_model_len: The context window; 0 reads it from the endpoint.
-        completion_reserve: The completion tokens kept when a long-context
-            prompt is truncated; None keeps 8192 with reasoning, 4096
-            without.
-        token_safety_margin: The tokens kept free when the available token
-            budget is estimated.
         tokenizer_path: The tokenizer prompt tokens are counted with; None
             uses the model's path.
     """
 
     max_tokens: int = 0
     max_model_len: int = 0
-    completion_reserve: int | None = None
-    token_safety_margin: int = 256
     tokenizer_path: str | None = None
 
 

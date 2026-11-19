@@ -12,7 +12,6 @@ reasoning = true
 [model.generation.context]
 max_tokens = 1024
 max_model_len = 32768
-completion_reserve = 16384
 
 [model.generation.think]
 temperature = 0.6

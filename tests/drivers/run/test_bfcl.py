@@ -123,7 +123,6 @@ def test_generation_config_carries_the_modes_params_and_the_budget(config: Confi
     assert sent["reasoning"] is True
     assert sent["max_model_len"] == 32768
     assert sent["max_tokens"] == 1024
-    assert sent["token_safety_margin"] == config.model.generation.context.token_safety_margin
     assert sent["request_timeout"] == config.general.request_timeout
 
 

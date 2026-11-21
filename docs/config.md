@@ -240,6 +240,7 @@ lm_eval = { task = "ruler", max_seq_lengths = [65536, 131072], generation = { re
 | `BRAVE_API_KEY` | | bfcl's web_search categories query Brave with it. |
 | `BFCL_ENCODER_MODEL` | | A local all-MiniLM-L6-v2 for bfcl's memory categories on offline nodes. |
 | `INSPECT_SINGULARITY_SIF_DIR` | `.cache/singularity_sif` in the domyn-inspect checkout | The Singularity image cache of inspect's code and swe tasks; see [benchmarks.md](benchmarks.md#inspect). |
+| `INSPECT_SINGULARITY_MEMORY_LIMIT_MB` | no cap | The virtual memory cap, in MB, of every command run in inspect's Singularity sandboxes, so one runaway command cannot get the whole job OOM-killed. See [domyn-inspect's sandbox README](../suites/domyn-inspect/domyn_inspect/sandboxes/README.md#memory). |
 | `SINGULARITY_TMPDIR` | | Where `singularity pull` builds its temporary images. |
 
 [.env.example](../.env.example) lists them: copy it to `.env` and run with

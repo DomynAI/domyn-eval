@@ -92,7 +92,7 @@ The context window and how it is budgeted. Only `max_tokens` applies to
 | --- | --- | --- |
 | `max_tokens` | `0`, and `4096` for `[judge]` and `[user]` | The cap on each generation; `0` uses what the context window leaves, which lets a looping judge write its whole window into the conversation. |
 | `max_model_len` | `0` | The context window; `0` reads it from the endpoint. |
-| `tokenizer_path` | `model.path` | The tokenizer prompt tokens are counted with; without one, prompt lengths are estimated. |
+| `tokenizer_path` | `model.path` | The tokenizer prompt tokens are counted with; a run that counts them (a `max_tokens` cap, LongBench v2's cut) fails at startup without one. |
 
 ## `[slurm]`
 

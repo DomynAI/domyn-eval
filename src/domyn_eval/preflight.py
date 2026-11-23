@@ -59,7 +59,7 @@ def _has_transformers(python: Path) -> bool | None:
     return any(python.parent.parent.glob("lib/python*/site-packages/transformers"))
 
 
-def _check_tokenizer_dir(path: Path, estimate: str) -> Check:
+def _check_tokenizer_dir(path: Path, consequence: str) -> Check:
     """Load the tokenizer in ``path`` as domyn-inspect does.
 
     It tries AutoTokenizer, then tokenizer.json alone, in this Python.
@@ -76,7 +76,7 @@ def _check_tokenizer_dir(path: Path, estimate: str) -> Check:
         except Exception:  # noqa: BLE001
             # Report AutoTokenizer's error, the more telling one, on one line.
             error = " ".join(str(e).split())
-            return Check(FAIL, f"cannot load the tokenizer in {path} ({type(e).__name__}: {error}); {estimate}")
+            return Check(FAIL, f"cannot load the tokenizer in {path} ({type(e).__name__}: {error}); {consequence}")
     return Check(OK, f"tokenizer loads from {path}")
 
 
@@ -246,32 +246,33 @@ class Preflight:
         return checks
 
     def check_tokenizer(self) -> list[Check]:
-        """Check that the token budget will count tokens rather than estimate.
+        """Check that the suites can count prompt tokens with the model's tokenizer.
 
         A local directory is loaded once, in this Python; a hub id is not
         downloaded. The selected suites' environments must have transformers.
         """
-        estimate = "prompt lengths will be estimated"
+        # domyn-inspect fails at startup without one when it sends a max_tokens cap or cuts LongBench v2
+        consequence = "runs that count prompt tokens will fail"
         path = self.config.model.generation.context.tokenizer_path or self.config.model.path
         if not path:
             return [
                 Check(
                     WARN,
-                    f"model.generation.context.tokenizer_path and model.path are unset; {estimate}",
+                    f"model.generation.context.tokenizer_path and model.path are unset; {consequence}",
                 )
             ]
         local = Path(path).expanduser()
         if local.is_dir():
-            checks = [_check_tokenizer_dir(local, estimate)]
+            checks = [_check_tokenizer_dir(local, consequence)]
         elif local.exists() or local.is_absolute() or path.startswith((".", "~")):
             # A hub id is never absolute nor dot-relative: this is a bad path.
-            checks = [Check(FAIL, f"{path} is not a directory; {estimate}")]
+            checks = [Check(FAIL, f"{path} is not a directory; {consequence}")]
         else:
             checks = [Check(WARN, f"tokenizer {path!r} is taken as a hub id")]
         for suite, resolved in self._resolved.items():
             python = resolved.python if resolved else None
             if python is not None and _has_transformers(python) is False:
-                checks.append(Check(WARN, f"{suite}: no transformers in {python}; {estimate}"))
+                checks.append(Check(WARN, f"{suite}: no transformers in {python}; {consequence}"))
         return checks
 
     def check_endpoints(self) -> list[Check]:

@@ -276,6 +276,26 @@ def test_registered_suite_section_loads(tmp_path):
     assert config.suite.extra.n_threads == 8
 
 
+class _PluginEntryPoint:
+    def load(self):
+        register_suite("plugged", ExtraConfig, drivers=UNUSED_DRIVERS)
+
+
+def test_suite_plugins_register_through_entry_points(monkeypatch):
+    for registry in ("_SUITES", "_DRIVERS", "_ENTRY_CHECKS"):
+        monkeypatch.setattr(config_module, registry, dict(getattr(config_module, registry)))
+    groups = []
+
+    def entry_points(group):
+        groups.append(group)
+        return [_PluginEntryPoint()]
+
+    monkeypatch.setattr(config_module, "entry_points", entry_points)
+    config_module.load_suite_plugins()
+    assert groups == ["domyn_eval.suites"]
+    assert registered_suites()[-1] == "plugged"
+
+
 @pytest.mark.parametrize("name", ["bfcl", "judge", "user"])
 def test_register_suite_rejects_taken_names(name):
     with pytest.raises(ValueError, match="reserved or already registered"):

@@ -97,9 +97,10 @@ inspect = { task = "swe", max_tasks = 1, num_threads = 100, generation = { conte
 [long_context]
 description = "Long context: LongBench v2."
 [long_context.suites]
-# LongBench v2 cuts its prompts to what max_tokens leaves of the window, as upstream cuts them to its max_len
-inspect = { task = "long_context", max_tasks = 1, num_threads = 100, generation = { context = { max_tokens = 8192 } }, custom_tasks = [
-    { task = "inspect_evals/longbench_v2" },
+# As upstream's pred.py: prompts are cut to a fixed max_len (its config/model2maxlen.json, 120000 for 128k windows),
+# here the 256k window less 8192 tokens, and the server gives the answer the rest of the window
+inspect = { task = "long_context", max_tasks = 1, num_threads = 100, custom_tasks = [
+    { task = "inspect_evals/longbench_v2", task_args = { max_prompt_tokens = 253952 } },
 ] }
 
 [ruler]

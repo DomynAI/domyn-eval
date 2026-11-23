@@ -109,17 +109,8 @@ takes another file; `--no-stats` skips them, as they read every sample).
 
 Suite paths in a config are relative to `SUITES_BASE_DIR` (default: the working
 directory), and `general.recipes_file` points at any recipes TOML, so a project
-can depend on domyn-eval and keep its own configs and suite checkouts.
-
-A suite of its own is added with `domyn_eval.config.register_suite`, called by a
-module the project declares in the `domyn_eval.suites` entry point group, which
-domyn-eval imports at startup:
-
-```toml
-# the project's pyproject.toml
-[project.entry-points."domyn_eval.suites"]
-my_suite = "my_package.my_suite"  # calls register_suite("my_suite", ...)
-```
+can depend on domyn-eval and keep its own configs and suite checkouts. A suite
+of its own is added with `domyn_eval.config.register_suite`.
 
 ## License
 

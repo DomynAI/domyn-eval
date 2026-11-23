@@ -9,6 +9,7 @@ import os
 import tomllib
 from collections.abc import Callable
 from dataclasses import asdict, is_dataclass
+from importlib.metadata import entry_points
 from pathlib import Path
 from typing import Any, Self, TypeVar, cast
 from urllib.parse import urlparse
@@ -943,3 +944,20 @@ def load_recipes(path: str | os.PathLike[str]) -> dict[str, RecipeConfig]:
         _validate_resolved(key, entry["suites"])
         recipes[key] = RecipeConfig(**entry)
     return recipes
+
+
+SUITE_ENTRY_POINTS = "domyn_eval.suites"
+
+
+def load_suite_plugins() -> None:
+    """Import the modules other packages declare in the ``domyn_eval.suites`` entry point group.
+
+    Each module registers its suites with ``register_suite`` when imported. A module that fails to import raises: a
+    suite its package promises is never silently missing.
+    """
+    for entry_point in entry_points(group=SUITE_ENTRY_POINTS):
+        entry_point.load()
+
+
+# Last, so that a plugin's module finds this one fully defined.
+load_suite_plugins()

@@ -12,13 +12,17 @@ import argparse
 import dataclasses
 import logging
 import os
+import uuid
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Literal, cast
 
 from lm_eval.api.group import Group
+from lm_eval.api.registry import register_model
 from lm_eval.api.task import Task
 from lm_eval.evaluator import simple_evaluate
 from lm_eval.loggers import EvaluationTracker
+from lm_eval.models.openai_completions import LocalChatCompletion, LocalCompletionsAPI
 from lm_eval.tasks import TaskManager
 from pydantic import BaseModel, SerializerFunctionWrapHandler, model_serializer
 
@@ -27,6 +31,41 @@ from domyn_eval.drivers.run.base import BaseRunDriver
 from domyn_eval.paths import suite_dir
 
 logger = logging.getLogger(__name__)
+
+
+class _SwarmSessionRouting:
+    """Sends each request with a session ID of its own, in ``X-Session-ID`` and ``session_params.session_id``.
+
+    Every lm_eval request is a whole conversation, so it also ends its session (``X-Dynamo-Session-Final``).
+    """
+
+    # Concurrent requests can pause between building the body and reading the headers
+    _session_id: ContextVar[str | None] = ContextVar("lmeval_swarm_session", default=None)
+
+    def _create_payload(self, *args: Any, **kwargs: Any) -> dict:  # noqa: ANN401 - lm_eval's own arguments
+        payload = super()._create_payload(*args, **kwargs)  # pyright: ignore[reportAttributeAccessIssue]
+        params = {"session_id": uuid.uuid4().hex, **payload.get("session_params", {})}
+        self._session_id.set(params["session_id"])
+        return {**payload, "session_params": params}
+
+    @property
+    def header(self) -> dict:
+        """lm_eval's headers, plus the session of the request being built, if any."""
+        headers = super().header  # pyright: ignore[reportAttributeAccessIssue]
+        session_id = self._session_id.get()
+        if session_id is None:
+            return headers
+        return {**headers, "X-Session-ID": session_id, "X-Dynamo-Session-Final": "true"}
+
+
+@register_model("swarm-local-completions")
+class SwarmLocalCompletions(_SwarmSessionRouting, LocalCompletionsAPI):
+    """``local-completions``, with a session ID on each request to a swarm."""
+
+
+@register_model("swarm-local-chat-completions")
+class SwarmLocalChatCompletion(_SwarmSessionRouting, LocalChatCompletion):
+    """``local-chat-completions``, with a session ID on each request to a swarm."""
 
 
 class _GenKwargs(BaseModel):
@@ -84,6 +123,7 @@ class _LMEvalArgs(BaseModel):
     allow_unsafe_code: bool
     limit: int | None = None
     metadata: _TaskMetadata | None = None
+    session_routing: bool = False  # the model is served by a swarm: run the model_type's ``swarm-`` variant
 
 
 class LMEvalRunDriver(BaseRunDriver):
@@ -180,6 +220,7 @@ class LMEvalRunDriver(BaseRunDriver):
             allow_unsafe_code=lm_eval.allow_unsafe_code,
             limit=general.max_samples if general.max_samples > 0 else None,
             metadata=metadata,
+            session_routing=bool(self.config.model.swarm_name),
         )
 
     @staticmethod
@@ -261,7 +302,7 @@ class LMEvalRunDriver(BaseRunDriver):
         )
 
         results = simple_evaluate(
-            model=args.model_type,
+            model=f"swarm-{args.model_type}" if args.session_routing else args.model_type,
             model_args=args.model_args.model_dump(),
             # simple_evaluate hands these to TaskManager.load, which takes Groups as they are; its annotation omits them
             tasks=cast("list[str | dict[str, Any] | Task]", tasks),

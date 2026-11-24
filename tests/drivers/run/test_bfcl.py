@@ -201,3 +201,10 @@ def test_max_retries_is_ignored_with_a_warning(
     with caplog.at_level("WARNING", logger="domyn_eval.drivers.run.bfcl"):
         BFCLRunDriver(config)
     assert ("general.max_retries=2 is ignored" in caplog.text) is warned
+
+
+@pytest.mark.parametrize("swarm_name", [None, "deployment-1"])
+def test_session_routing_is_on_only_for_a_swarm(config: Config, swarm_name: str | None) -> None:
+    config.model.swarm_name = swarm_name
+    sent = json.loads(_option(_commands(config)[0], "--generation-config"))
+    assert sent["session_routing"] is bool(swarm_name)

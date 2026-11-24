@@ -5,6 +5,7 @@ generation_kwargs) unless override_all says to always win. Uses fake TaskManager
 real lm_eval task registries, so this stays fast and independent of which tasks happen to be registered.
 """
 
+import asyncio
 import json
 import sys
 from pathlib import Path
@@ -277,3 +278,59 @@ def test_samples_go_to_their_own_files_and_the_report_reads_the_results(
     assert [json.loads(line)["doc_id"] for line in samples_file.read_text().splitlines()] == [0]
     report = LMEvalReportDriver(config.model.id or "").report()
     assert list(zip(report["benchmark"], report["metric"], report["score"], strict=True)) == [("task", "acc", 1.0)]
+
+
+@pytest.mark.parametrize("swarm_name", [None, "deployment-1"])
+@pytest.mark.parametrize("chat_completions", [False, True])
+def test_a_swarm_runs_the_session_routing_model(
+    config: Config,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    swarm_name: str | None,
+    chat_completions: bool,
+) -> None:
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path))
+    config.model.url = "http://localhost:8000/v1"
+    config.model.swarm_name = swarm_name
+    config.suite.lm_eval.task = "task"
+    config.suite.lm_eval.chat_completions = chat_completions
+    calls = []
+    monkeypatch.setattr(lmeval, "TaskManager", lambda **_: None)
+    monkeypatch.setattr(LMEvalRunDriver, "_load_tasks_with_selective_override", staticmethod(lambda *_, **__: []))
+    monkeypatch.setattr(lmeval, "simple_evaluate", lambda **kwargs: calls.append(kwargs))
+
+    args = LMEvalRunDriver(config)._lmeval_args()
+    LMEvalRunDriver.run_lmeval(args)
+
+    assert args.session_routing is bool(swarm_name)
+    [kwargs] = calls
+    assert kwargs["model"] == (f"swarm-{args.model_type}" if swarm_name else args.model_type)
+
+
+@pytest.mark.parametrize("chat", [False, True])
+def test_concurrent_swarm_requests_send_their_own_session_in_header_and_body(chat: bool) -> None:
+    cls = lmeval.SwarmLocalChatCompletion if chat else lmeval.SwarmLocalCompletions
+    client = cls.__new__(cls)
+    client.model = "m"
+    client._max_gen_toks = 20
+    client._header = {"Authorization": "Bearer secret", "X-Custom": "keep"}
+
+    async def request() -> tuple[dict, dict]:
+        messages = [{"role": "user", "content": "q"}] if chat else ["q"]
+        payload = client._create_payload(messages, generate=True, gen_kwargs={"temperature": 0.3})
+        await asyncio.sleep(0)  # let the other request build its payload in between
+        return payload, client.header
+
+    async def run() -> list[tuple[dict, dict]]:
+        return await asyncio.gather(request(), request())
+
+    calls = asyncio.run(run())
+    ids = [headers["X-Session-ID"] for _, headers in calls]
+    assert len(set(ids)) == 2
+    for payload, headers in calls:
+        assert payload["session_params"]["session_id"] == headers["X-Session-ID"]
+        assert headers["X-Dynamo-Session-Final"] == "true"
+        assert headers["Authorization"] == "Bearer secret"
+        assert headers["X-Custom"] == "keep"
+        assert payload["temperature"] == 0.3
+    assert client._header == {"Authorization": "Bearer secret", "X-Custom": "keep"}

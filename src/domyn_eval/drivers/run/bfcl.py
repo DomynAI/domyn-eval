@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class _GenerationConfig(BaseModel):
-    """What domyn-bfcl hands every handler through ``--generation-config``: sampling, reasoning, budget and timeout.
+    """What domyn-bfcl hands every handler through ``--generation-config``: sampling, budget, timeout and routing.
 
     Unset sampling params are sent as null, which domyn-bfcl does not send on. domyn-bfcl
     validates the keys strictly (``domyn_bfcl.config.GenerationConfig``), so a field added
@@ -38,6 +38,7 @@ class _GenerationConfig(BaseModel):
     token_safety_margin: int
     request_timeout: int
     max_samples: int
+    session_routing: bool
 
 
 class BFCLRunDriver(BaseRunDriver):
@@ -142,5 +143,6 @@ class BFCLRunDriver(BaseRunDriver):
                 "token_safety_margin": gen.context.token_safety_margin,
                 "request_timeout": general.request_timeout,
                 "max_samples": general.max_samples,
+                "session_routing": bool(self.config.model.swarm_name),
             }
         )

@@ -82,6 +82,6 @@ class BFCLStatDriver(BaseStatDriver):
         budget = context.max_tokens
         window = context.max_model_len  # the run saves the endpoint's when unset
         if window:
-            room = window - prompt - context.token_safety_margin
+            room = window - prompt
             budget = min(budget or room, room)
         return budget > 0 and completion >= self.profile.near_budget * budget

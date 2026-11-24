@@ -97,7 +97,8 @@ inspect = { task = "swe", max_tasks = 1, num_threads = 100, generation = { conte
 [long_context]
 description = "Long context: LongBench v2."
 [long_context.suites]
-inspect = { task = "long_context", max_tasks = 1, num_threads = 100, custom_tasks = [
+# max_tokens as upstream's pred.py gives the CoT step (1024; the answer step gets 128 there)
+inspect = { task = "long_context", max_tasks = 1, num_threads = 100, generation = { context = { max_tokens = 1024 } }, custom_tasks = [
     { task = "inspect_evals/longbench_v2" },
 ] }
 

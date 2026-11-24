@@ -468,6 +468,38 @@ _DRIVERS: dict[str, SuiteDrivers] = {}
 _ENTRY_CHECKS: dict[str, Callable[[list[Any]], None]] = {}
 _SHARED_ENV: set[str] = set()
 
+SUITE_ENTRY_POINTS = "domyn_eval.suites"
+# "unloaded", then "loading" while the plugins import, then "loaded".
+_plugins = "unloaded"
+
+
+def load_suite_plugins() -> None:
+    """Import the modules other packages declare in the ``domyn_eval.suites`` entry point group.
+
+    Each module registers its suites with ``register_suite`` when imported. A module that fails to import raises: a
+    suite its package promises is never silently missing.
+    """
+    for entry_point in entry_points(group=SUITE_ENTRY_POINTS):
+        entry_point.load()
+
+
+def _load_plugins_once() -> None:
+    """Load the suite plugins on the first registry lookup.
+
+    Not at import: a plugin imports this module, which must then be fully defined. A lookup made by a plugin while
+    the plugins load sees the suites registered so far; a failed load is retried, and raises again, on the next lookup.
+    """
+    global _plugins
+    if _plugins != "unloaded":
+        return
+    _plugins = "loading"
+    try:
+        load_suite_plugins()
+    except BaseException:
+        _plugins = "unloaded"
+        raise
+    _plugins = "loaded"
+
 
 def register_suite(
     name: str,
@@ -517,6 +549,7 @@ def register_suite(
 
 def registered_suites() -> tuple[str, ...]:
     """Return the registered suite names, in registration order."""
+    _load_plugins_once()
     return tuple(_SUITES)
 
 
@@ -526,6 +559,7 @@ def suite_drivers(name: str) -> SuiteDrivers:
     Raises:
         ValueError: If the suite is not registered.
     """
+    _load_plugins_once()
     if name not in _DRIVERS:
         msg = f"unknown suite {name!r}; registered suites are {list(_DRIVERS)}"
         raise ValueError(msg)
@@ -538,6 +572,7 @@ def has_own_venv(name: str) -> bool:
     Args:
         name: A suite name.
     """
+    _load_plugins_once()
     return name not in _SHARED_ENV
 
 
@@ -557,6 +592,7 @@ class SuiteConfig:
         Raises:
             ValueError: If ``raw`` names an unregistered suite.
         """
+        _load_plugins_once()
         raw = raw or {}
         unknown = sorted(set(raw) - set(_SUITES))
         if unknown:
@@ -913,6 +949,7 @@ def _check_entries(suite: str, values: list[Any]) -> None:
 
 def _validate_resolved(key: str, suites: dict[str, Any]) -> None:
     """Check the suites of recipe ``key`` and their entries."""
+    _load_plugins_once()
     unknown = sorted(set(suites) - set(_SUITES))
     if unknown:
         msg = f"recipe {key!r} names unknown suites {unknown}; registered suites are {list(_SUITES)}"
@@ -944,20 +981,3 @@ def load_recipes(path: str | os.PathLike[str]) -> dict[str, RecipeConfig]:
         _validate_resolved(key, entry["suites"])
         recipes[key] = RecipeConfig(**entry)
     return recipes
-
-
-SUITE_ENTRY_POINTS = "domyn_eval.suites"
-
-
-def load_suite_plugins() -> None:
-    """Import the modules other packages declare in the ``domyn_eval.suites`` entry point group.
-
-    Each module registers its suites with ``register_suite`` when imported. A module that fails to import raises: a
-    suite its package promises is never silently missing.
-    """
-    for entry_point in entry_points(group=SUITE_ENTRY_POINTS):
-        entry_point.load()
-
-
-# Last, so that a plugin's module finds this one fully defined.
-load_suite_plugins()

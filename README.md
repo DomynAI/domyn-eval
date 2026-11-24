@@ -113,7 +113,7 @@ can depend on domyn-eval and keep its own configs and suite checkouts.
 
 A suite of its own is added with `domyn_eval.config.register_suite`, called by a
 module the project declares in the `domyn_eval.suites` entry point group, which
-domyn-eval imports at startup:
+domyn-eval imports the first time it looks a suite up:
 
 ```toml
 # the project's pyproject.toml

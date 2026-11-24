@@ -44,7 +44,12 @@ that section's `url` is unset and `run --swarm` does not serve one.
 | `url` | | The OpenAI-compatible base URL; `/v1` is appended if missing. Filled in by `run --swarm`. |
 | `name` | | The model's display name. |
 | `swarm_config` | | The domyn-swarm YAML `run --swarm` deploys the model from. |
-| `swarm_name` | | A running domyn-swarm deployment `run --swarm` reuses. |
+| `swarm_name` | | A running domyn-swarm deployment `run --swarm` reuses. Filled in by `run --swarm`. |
+
+A model with a `swarm_name` gets a session ID on each request, so the swarm's
+router keeps the turns of a conversation on the same replica. The ID goes in the
+`X-Session-ID` header and the `session_params.session_id` body field. A multi-turn conversation cannot tell its last
+turn in advance, so Dynamo drops its session when the session timer expires.
 
 ### `[model.generation]`, `[judge.generation]` and `[user.generation]`
 

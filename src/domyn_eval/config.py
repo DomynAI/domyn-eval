@@ -9,6 +9,7 @@ import os
 import tomllib
 from collections.abc import Callable
 from dataclasses import asdict, is_dataclass
+from importlib.metadata import entry_points
 from pathlib import Path
 from typing import Any, Self, TypeVar, cast
 from urllib.parse import urlparse
@@ -460,6 +461,30 @@ _DRIVERS: dict[str, SuiteDrivers] = {}
 _ENTRY_CHECKS: dict[str, Callable[[list[Any]], None]] = {}
 _SHARED_ENV: set[str] = set()
 
+SUITE_ENTRY_POINTS = "domyn_eval.suites"
+_plugins_loaded = False  # set before loading, so a lookup made by a plugin doesn't load the plugins again
+
+
+def load_suite_plugins() -> None:
+    """Import the modules other packages declare in the ``domyn_eval.suites`` entry point group.
+
+    Each module registers its suites with ``register_suite`` when imported. A module that fails to import raises: a
+    suite its package promises is never silently missing.
+    """
+    for entry_point in entry_points(group=SUITE_ENTRY_POINTS):
+        entry_point.load()
+
+
+def _load_plugins_once() -> None:
+    global _plugins_loaded
+    if not _plugins_loaded:
+        _plugins_loaded = True
+        try:
+            load_suite_plugins()
+        except BaseException:
+            _plugins_loaded = False
+            raise
+
 
 def register_suite(
     name: str,
@@ -509,6 +534,7 @@ def register_suite(
 
 def registered_suites() -> tuple[str, ...]:
     """Return the registered suite names, in registration order."""
+    _load_plugins_once()
     return tuple(_SUITES)
 
 
@@ -518,6 +544,7 @@ def suite_drivers(name: str) -> SuiteDrivers:
     Raises:
         ValueError: If the suite is not registered.
     """
+    _load_plugins_once()
     if name not in _DRIVERS:
         msg = f"unknown suite {name!r}; registered suites are {list(_DRIVERS)}"
         raise ValueError(msg)
@@ -530,6 +557,7 @@ def has_own_venv(name: str) -> bool:
     Args:
         name: A suite name.
     """
+    _load_plugins_once()
     return name not in _SHARED_ENV
 
 
@@ -549,6 +577,7 @@ class SuiteConfig:
         Raises:
             ValueError: If ``raw`` names an unregistered suite.
         """
+        _load_plugins_once()
         raw = raw or {}
         unknown = sorted(set(raw) - set(_SUITES))
         if unknown:
@@ -905,6 +934,7 @@ def _check_entries(suite: str, values: list[Any]) -> None:
 
 def _validate_resolved(key: str, suites: dict[str, Any]) -> None:
     """Check the suites of recipe ``key`` and their entries."""
+    _load_plugins_once()
     unknown = sorted(set(suites) - set(_SUITES))
     if unknown:
         msg = f"recipe {key!r} names unknown suites {unknown}; registered suites are {list(_SUITES)}"

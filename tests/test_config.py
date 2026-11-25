@@ -1,5 +1,8 @@
 import copy
 import dataclasses
+import os
+import subprocess
+import sys
 import tomllib
 
 import pydantic
@@ -274,6 +277,73 @@ def test_registered_suite_section_loads(tmp_path):
     config = _load(tmp_path, "[extra]\nn_threads = 8\n")
     assert registered_suites()[-1] == "extra"
     assert config.suite.extra.n_threads == 8
+
+
+class _PluginEntryPoint:
+    fail = False
+
+    def load(self):
+        assert registered_suites()[-1] == "lm_eval"  # a lookup while the plugins load does not load them again
+        if self.fail:
+            msg = "broken plugin"
+            raise ImportError(msg)
+        register_suite("plugged", ExtraConfig, drivers=UNUSED_DRIVERS)
+
+
+@pytest.fixture
+def plugins(monkeypatch):
+    """Install entry points and return the groups looked up; the plugins are not loaded yet."""
+    for registry in ("_SUITES", "_DRIVERS", "_ENTRY_CHECKS"):
+        monkeypatch.setattr(config_module, registry, dict(getattr(config_module, registry)))
+    monkeypatch.setattr(config_module, "_plugins_loaded", False)
+    groups = []
+    installed = [_PluginEntryPoint()]
+
+    def entry_points(group):
+        groups.append(group)
+        return installed
+
+    monkeypatch.setattr(config_module, "entry_points", entry_points)
+    return groups, installed
+
+
+def test_suite_plugins_load_on_the_first_lookup(plugins):
+    groups, _ = plugins
+    assert registered_suites()[-1] == "plugged"
+    registered_suites()
+    assert groups == ["domyn_eval.suites"]
+
+
+def test_failed_suite_plugin_raises_on_every_lookup(plugins):
+    _, installed = plugins
+    installed[0].fail = True
+    for _ in range(2):
+        with pytest.raises(ImportError, match="broken plugin"):
+            registered_suites()
+    installed[0].fail = False
+    assert registered_suites()[-1] == "plugged"
+
+
+def test_suite_plugin_can_import_the_config_module(tmp_path):
+    (tmp_path / "my_suite.py").write_text(
+        "import domyn_eval.config\n"
+        "from dataclasses import dataclass\n"
+        "@dataclass\n"
+        "class MyConfig:\n"
+        "    n: int = 1\n"
+        "domyn_eval.config.register_suite(\n"
+        '    "my_suite", MyConfig, drivers=domyn_eval.config.SuiteDrivers(run="unused:Run", report="unused:Report")\n'
+        ")\n"
+    )
+    dist_info = tmp_path / "my_suite-0.dist-info"
+    dist_info.mkdir()
+    (dist_info / "METADATA").write_text("Metadata-Version: 2.1\nName: my-suite\nVersion: 0\n")
+    (dist_info / "entry_points.txt").write_text("[domyn_eval.suites]\nmy_suite = my_suite\n")
+    code = "import domyn_eval.cli, domyn_eval.config as c; print(c.registered_suites()[-1])"
+    env = {**os.environ, "PYTHONPATH": str(tmp_path)}
+    result = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "my_suite"
 
 
 @pytest.mark.parametrize("name", ["bfcl", "judge", "user"])

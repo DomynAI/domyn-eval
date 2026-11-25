@@ -27,6 +27,7 @@ class InspectTask(BaseModel):
     generate: dict[str, object] = {}
     message_limit: int | None = None
     pass_k: int | None = None
+    g_pass: bool = False
     dual_score: bool = False
     # ours, not domyn-inspect's: the model roles the task needs served
     roles: list[Literal["user", "grader"]] = Field(default=[], exclude=True)

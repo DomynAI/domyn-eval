@@ -469,8 +469,7 @@ _ENTRY_CHECKS: dict[str, Callable[[list[Any]], None]] = {}
 _SHARED_ENV: set[str] = set()
 
 SUITE_ENTRY_POINTS = "domyn_eval.suites"
-# "unloaded", then "loading" while the plugins import, then "loaded".
-_plugins = "unloaded"
+_plugins_loaded = False  # set before loading, so a lookup made by a plugin doesn't load the plugins again
 
 
 def load_suite_plugins() -> None:
@@ -484,21 +483,14 @@ def load_suite_plugins() -> None:
 
 
 def _load_plugins_once() -> None:
-    """Load the suite plugins on the first registry lookup.
-
-    Not at import: a plugin imports this module, which must then be fully defined. A lookup made by a plugin while
-    the plugins load sees the suites registered so far; a failed load is retried, and raises again, on the next lookup.
-    """
-    global _plugins
-    if _plugins != "unloaded":
-        return
-    _plugins = "loading"
-    try:
-        load_suite_plugins()
-    except BaseException:
-        _plugins = "unloaded"
-        raise
-    _plugins = "loaded"
+    global _plugins_loaded
+    if not _plugins_loaded:
+        _plugins_loaded = True
+        try:
+            load_suite_plugins()
+        except BaseException:
+            _plugins_loaded = False
+            raise
 
 
 def register_suite(

@@ -295,7 +295,7 @@ def plugins(monkeypatch):
     """Install entry points and return the groups looked up; the plugins are not loaded yet."""
     for registry in ("_SUITES", "_DRIVERS", "_ENTRY_CHECKS"):
         monkeypatch.setattr(config_module, registry, dict(getattr(config_module, registry)))
-    monkeypatch.setattr(config_module, "_plugins", "unloaded")
+    monkeypatch.setattr(config_module, "_plugins_loaded", False)
     groups = []
     installed = [_PluginEntryPoint()]
 

@@ -97,6 +97,13 @@ def test_task_config_forwards_pass_k(config: Config) -> None:
     assert _task_config(config)["tasks"][0]["pass_k"] == 16
 
 
+def test_task_config_forwards_g_pass(config: Config) -> None:
+    config.suite.inspect.custom_tasks = [{"task": "inspect_evals/aime2025", "pass_k": 16, "g_pass": True}]
+    assert _task_config(config)["tasks"][0]["g_pass"] is True
+    config.suite.inspect.custom_tasks = [{"task": "inspect_evals/aime2025", "pass_k": 16}]
+    assert "g_pass" not in _task_config(config)["tasks"][0]  # unset: left to domyn-inspect's default
+
+
 def test_task_config_keeps_task_args_types(config: Config) -> None:
     task_args = {"fewshot": 5, "challenges": ["a", "b"], "shuffle": True}
     config.suite.inspect.custom_tasks = [{"task": "inspect_evals/mmlu_5_shot", "task_args": task_args}]

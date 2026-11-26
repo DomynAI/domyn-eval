@@ -142,6 +142,7 @@ Each `custom_tasks` entry is a table:
 | `generate` | `{}` | This task's generation settings (inspect's `GenerateConfig`), over the config's. |
 | `message_limit` | | Messages an agentic sample may exchange. |
 | `pass_k` | | Samples per prompt; reports the mean and pass@1, 2, 4, ... up to k. |
+| `g_pass` | `false` | With `pass_k`, also reports [G-Pass@v](https://arxiv.org/abs/2412.13147) at τ = 0.5, 0.75 and 1 (`g_pass_t50_at_<v>`, ...) and mG-Pass@v (`mg_pass_at_<v>`) for v = 2, 4, ... up to k: how often the model is right in at least τ of v samples, not just once. |
 | `dual_score` | `false` | Report both the upstream scorer's strict accuracy and domyn-inspect's looser answer extraction. |
 | `roles` | `[]` | The model roles the task needs, `"user"` and `"grader"`; `run --swarm` serves the models playing them. |
 

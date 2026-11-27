@@ -14,13 +14,14 @@ description = "Math: AIME 2025 and AIME 2026 (avg@16), MGSM in European language
 inspect = { task = "math", max_tasks = 20, fail_on_error = 0.1, custom_tasks = [
     { task = "inspect_evals/aime2025", pass_k = 10 },
     { task = "inspect_evals/aime2026", pass_k = 10 },
+    { task = "inspect_evals/gsm8k" },
     { task = "inspect_evals/mgsm", task_args = { languages = ["de", "en", "es", "fr", "ru"] } },
 ] }
 
 [knowledge]
 description = "Knowledge and reasoning: GPQA Diamond, MMLU-Pro."
 [knowledge.suites]
-inspect = { task = "knowledge", max_tasks = 20, fail_on_error = 0.1, request_timeout = 2400, custom_tasks = [
+inspect = { task = "knowledge", max_tasks = 20, fail_on_error = 0.1, custom_tasks = [
     { task = "inspect_evals/gpqa_diamond" },
     { task = "inspect_evals/mmlu_pro" },
 ] }

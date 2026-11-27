@@ -21,10 +21,10 @@ recipe as a `custom_tasks` entry; see [config.md](config.md#inspect).
 | IFEval | `ifeval` | inspect_evals | if, domyn_edge |
 | IFBench | `ifbench` | domyn-inspect | if, domyn_edge |
 | IFStruct | `ifstruct` | domyn-inspect | if, domyn_edge |
-| tau2 airline | `tau2_airline` | inspect_evals | tau2, tau3, domyn_edge |
-| tau2 retail | `tau2_retail` | inspect_evals | tau2, tau3, domyn_edge |
-| tau2 telecom | `tau2_telecom` | inspect_evals | tau2, tau3, domyn_edge |
-| tau3 banking | `tau2_banking` | inspect_evals | tau3, domyn_edge |
+| tau2 airline | `tau2_airline_patched` | domyn-inspect | tau2, tau3, domyn_edge |
+| tau2 retail | `tau2_retail_patched` | domyn-inspect | tau2, tau3, domyn_edge |
+| tau2 telecom | `tau2_telecom_patched` | domyn-inspect | tau2, tau3, domyn_edge |
+| tau3 banking | `tau2_banking_patched` | domyn-inspect | tau3, domyn_edge |
 | SciCode (with background) | `scicode_singularity` | domyn-inspect | code, domyn_edge |
 | BigCodeBench | `bigcodebench_singularity` | domyn-inspect | code, domyn_edge |
 | MBPP | `mbpp_singularity` | domyn-inspect | code, domyn_edge |

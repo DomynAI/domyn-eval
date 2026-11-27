@@ -57,18 +57,22 @@ bfcl = "test_category=all_scoring_no_websearch"
 [tau2]
 description = "Agentic customer service: tau2 airline, retail, telecom. [user], else [judge], plays the user."
 [tau2.suites]
+# The *_patched tasks are upstream's, ending an episode once a model runs out of context (and, for banking,
+# with its tools under upstream tau2's names); display_name keeps upstream's report names.
 inspect = { task = "tau2", max_tasks = 20, custom_tasks = [
-    { task = "inspect_evals/tau2_airline", message_limit = 200, roles = ["user"] },
-    { task = "inspect_evals/tau2_retail", message_limit = 200, roles = ["user"] },
-    { task = "inspect_evals/tau2_telecom", message_limit = 200, roles = ["user"] },
+    { task = "inspect_evals/tau2_airline_patched", display_name = "tau2_airline", message_limit = 200, roles = ["user"] },
+    { task = "inspect_evals/tau2_retail_patched", display_name = "tau2_retail", message_limit = 200, roles = ["user"] },
+    { task = "inspect_evals/tau2_telecom_patched", display_name = "tau2_telecom", message_limit = 200, roles = ["user"] },
 ] }
 
 [tau3]
 description = "tau2, then agentic banking, with knowledge-base search and discoverable tools. [user], else [judge], plays the user."
 extend = ["tau2"]
 [tau3.suites]
+# max_tool_output: banking_grep returns its top 10 documents in full, up to ~56 KB; inspect's
+# default 16 KiB cut would hide the discoverable tool a task needs.
 inspect = { task = "tau3", max_tasks = 20, custom_tasks = [
-    { task = "inspect_evals/tau2_banking", message_limit = 200, roles = ["user"] },
+    { task = "inspect_evals/tau2_banking_patched", display_name = "tau2_banking", message_limit = 200, roles = ["user"], generate = { max_tool_output = 65536 } },
 ] }
 
 #-------------------------------------------------------------------------------
